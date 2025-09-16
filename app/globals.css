@@ -1,0 +1,349 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 84% 4.9%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222.2 84% 4.9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  .dark {
+    /* Main background - very dark but not pure black */
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    /* Cards and elevated surfaces - dark blue/slate like in your image */
+    --card: 215 28% 17%;
+    --card-foreground: 210 40% 98%;
+
+    /* Popovers use same card color */
+    --popover: 215 28% 17%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary colors */
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 84% 4.9%;
+
+    /* Secondary surfaces - slightly lighter than cards */
+    --secondary: 215 25% 27%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted areas - between card and secondary */
+    --muted: 215 25% 22%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    /* Accent areas */
+    --accent: 215 25% 27%;
+    --accent-foreground: 210 40% 98%;
+
+    /* Destructive */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Borders and inputs - slightly lighter than cards */
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 217.2 91.2% 59.8%;
+
+    /* Charts */
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Prevent zoom on mobile input focus */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Mobile-specific fixes */
+  @media (max-width: 768px) {
+    body {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
+    /* Fix text scaling issues */
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      line-height: 1.2;
+    }
+
+    /* Ensure consistent button sizing */
+    button {
+      font-size: 14px;
+      padding: 8px 12px;
+      min-height: 40px;
+    }
+
+    /* Card padding adjustments */
+    .card {
+      padding: 12px;
+    }
+
+    /* Timer display fixes */
+    .timer-display {
+      font-size: 2.5rem !important;
+      line-height: 1 !important;
+    }
+  }
+}
+
+/* Custom scrollbar for dark theme */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: hsl(215 28% 17%);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(215 25% 27%);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(215 25% 35%);
+}
+
+/* Ensure proper contrast in dark mode */
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line {
+  stroke: hsl(215 25% 27%);
+}
+
+.dark .recharts-text {
+  fill: hsl(210 40% 98%);
+}
+
+/* Mobile-optimized responsive layout */
+.dashboard-container {
+  max-width: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+}
+
+/* Mobile-specific padding and spacing */
+@media (max-width: 640px) {
+  .dashboard-container {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Mobile card spacing */
+  .mobile-card-spacing > * + * {
+    margin-top: 1rem;
+  }
+
+  /* Mobile button adjustments */
+  .mobile-button {
+    font-size: 13px;
+    padding: 6px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+
+  /* Mobile header adjustments */
+  .mobile-header {
+    padding: 0.75rem;
+  }
+
+  /* Mobile user info */
+  .mobile-user-info h1 {
+    font-size: 1.125rem;
+    line-height: 1.3;
+  }
+
+  .mobile-user-info .user-title {
+    font-size: 0.75rem;
+  }
+
+  /* Mobile timer fixes */
+  .mobile-timer-display {
+    font-size: 2rem !important;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    line-height: 1.1 !important;
+    letter-spacing: -0.025em;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  .dashboard-container {
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-container {
+    padding-left: 12rem !important;
+    padding-right: 12rem !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .dashboard-container {
+    padding-left: 18rem !important;
+    padding-right: 18rem !important;
+  }
+}
+
+@media (min-width: 1536px) {
+  .dashboard-container {
+    padding-left: 24rem !important;
+    padding-right: 24rem !important;
+  }
+}
+
+/* Full width content */
+.main-content-full {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* Theme-specific button colors */
+.timer-start-light {
+  background-color: #22c55e;
+  color: white;
+}
+
+.timer-start-light:hover {
+  background-color: #16a34a;
+}
+
+.timer-stop-light {
+  background-color: #ef4444;
+  color: white;
+}
+
+.timer-stop-light:hover {
+  background-color: #dc2626;
+}
+
+.timer-start-dark {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.timer-start-dark:hover {
+  background-color: #2563eb;
+}
+
+.timer-stop-dark {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.timer-stop-dark:hover {
+  background-color: #d97706;
+}
+
+/* Prevent horizontal scrolling on mobile */
+body {
+  overflow-x: hidden;
+}
+
+/* Mobile touch optimization */
+@media (hover: none) and (pointer: coarse) {
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Mobile-specific component fixes */
+@media (max-width: 640px) {
+  /* Events & Announcements mobile fixes */
+  .events-card .card-header {
+    padding: 1rem 0.75rem 0.5rem 0.75rem;
+  }
+
+  .events-card .card-content {
+    padding: 0.5rem 0.75rem 1rem 0.75rem;
+  }
+
+  .events-card .create-button {
+    font-size: 12px;
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+
+  /* Timer mobile fixes */
+  .timer-card .card-header {
+    padding: 1rem 0.75rem 0.5rem 0.75rem;
+  }
+
+  .timer-card .card-content {
+    padding: 0.5rem 0.75rem 1rem 0.75rem;
+  }
+
+  /* Badge mobile fixes */
+  .mobile-badge {
+    font-size: 0.6875rem;
+    padding: 2px 6px;
+  }
+}
+
+@layer base {
+  h1, h2, h3, h4, h5, h6,
+  p, span, label, button, a, 
+  th, td, strong, b, small,
+  .ui-label, .card-title, .tab-label, .menu-label, .Link{
+    @apply select-none;
+  }
+
+  input,
+  textarea,
+  pre,
+  code,
+  .selectable,
+  .chat-message,
+  .copyable {
+    @apply select-text;
+  }
+}
+
