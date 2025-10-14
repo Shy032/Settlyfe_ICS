@@ -1,182 +1,198 @@
 // Account types (handles login credentials)
 export interface Account {
   id: string
-  loginEmail: string
-  passwordHash?: string
-  accessLevel: "owner" | "admin" | "member"
+  login_email: string
+  password_hash?: string
+  access_level: "owner" | "admin" | "member"
   status: "active" | "inactive" | "suspended"
-  employeeId?: string
-  createdAt: string
-  updatedAt: string
+  employee_id?: string
+  created_at: string
+  updated_at: string
+}
+
+// Daily update types
+export interface DailyUpdate {
+  id: string
+  employee_id: string
+  date: string
+  description: string
+  task_id?: string
+  location?: string
+  screenshot_path?: string
+  emoji_reaction?: string // New field for emoji reaction
+  admin_comment?: string // New
+  admin_id?: string // New
+  created_at: string
+  updated_at: string
 }
 
 // Employee types (handles employee information)
 export interface Employee {
   id: string
-  firstName: string
-  lastName: string
+  first_name: string
+  last_name: string
   title?: string
   role?: string
-  teamId?: string
-  departmentId?: string
-  joinDate: string
+  team_id?: string
+  department_id?: string
+  join_date: string
   status: "active" | "inactive" | "terminated"
-  overallAssessment?: string
+  overall_assessment?: string
   phone?: string
-  personalEmail?: string
-  githubEmail?: string
-  zoomEmail?: string
+  personal_email?: string
+  github_email?: string
+  zoom_email?: string
   note?: string
-  profilePhoto?: string
-  theme: "light" | "dark" | "neon"
-  preferredLanguage: string
-  createdAt: string
-  updatedAt: string
+  profile_photo?: string
+  theme: "light" | "dark"
+  preferred_language: string
+  // Access control fields
+  can_view_team_daily_tasks: boolean
+  can_view_universal_daily_tasks: boolean
+  can_view_team_moments: boolean
+  can_view_universal_moments: boolean
+  created_at: string
+  updated_at: string
 }
 
 // Department types
 export interface Department {
   id: string
   name: string
-  headEmployeeId?: string
-  createdAt: string
+  head_employee_id?: string
+  created_at: string
 }
 
 // Team types
 export interface Team {
   id: string
-
   name: string
-  leadEmployeeId?: string
-  parentTeamId?: string
-  createdAt: string
-
+  lead_employee_id?: string
+  parent_team_id?: string
+  created_at: string
 }
 
 // Employee documents
 export interface EmployeeDocument {
   id: string
-  employeeId: string
+  employee_id: string
   type: string
-  filePath: string
-  uploadDate: string
+  file_path: string
+  upload_date: string
 }
 
 // Weekly credit score types
 export interface WeeklyCreditScore {
   id: string
-  employeeId: string
-  adminId: string
-  weekNumber: number
+  employee_id: string
+  admin_id: string
+  week_number: number
   year: number
-  effortCredit: number
-  outcomeCredit: number
-  collabCredit: number
+  effort_credit: number
+  outcome_credit: number
+  collab_credit: number
   wcs: number
   checkmarks: number
-  createdAt: string
+  created_at: string
 }
 
 // Quarter score types
 export interface QuarterScore {
   id: string
-  employeeId: string
+  employee_id: string
   year: number
-  quarterNumber: number
+  quarter_number: number
   qs: number
-  cumulativeCheckmarks: number
+  cumulative_checkmarks: number
   assessment?: string
-  createdAt: string
+  created_at: string
 }
 
 // Executive decision types
 export interface ExecutiveDecision {
   id: string
-  adminId: string
+  admin_id: string
   date: string
+  title: string
   description: string
-  createdAt: string
+  created_at: string
 }
 
 // PTO request types
 export interface PTORequest {
   id: string
-  employeeId: string
-  requestDate: string
-  startDate: string
-  endDate: string
+  employee_id: string
+  request_date: string
+  start_date: string
+  end_date: string
   duration: number
   reasoning: string
+  // New fields as per schema
+  type: "urgent" | "planned"
+  impact: string
+  handover_details: string
+  approve_comments?: string
+  notice_given?: number
   status: "pending" | "approved" | "rejected"
-  approvedBy?: string
-  approvedDate?: string
-  createdAt: string
+  approved_by?: string
+  approved_date?: string
+  created_at: string
 }
 
 // Task types
 export interface TaskAttachmentGroup {
   id: string
-  createdAt: string
+  created_at: string
 }
 
 export interface Task {
   id: string
-  adminId: string
+  admin_id: string
   title: string
   description?: string
-  publishDate: string
-  dueDate?: string
-  completionDate?: string
+  publish_date: string
+  due_date?: string
+  completion_date?: string
   priority: "low" | "medium" | "high"
-  visibility: "everyone" | "team-only" | "department-only"
+  visibility: "everyone" | "team-only" | "department-only" | "creator-only"
   status: "not-started" | "in-progress" | "completed" | "cancelled"
-  attachmentGroupId?: string
-  createdAt: string
+  // New fields as per schema
+  progress: number
+  is_key_result: boolean
+  published: boolean
+  attachment_group_id?: string
+  created_at: string
 }
 
 export interface TaskAssignment {
   id: string
-  taskId: string
-  isTeam: boolean
-  assigneeId: string
-  createdAt: string
+  task_id: string
+  is_team: boolean
+  assignee_id: string
+  created_at: string
 }
 
 export interface TaskAttachment {
   id: string
-  attachmentGroupId: string
-  filePath: string
-  fileType: string
-  uploadDate: string
+  attachment_group_id: string
+  file_path: string
+  file_type: string
+  upload_date: string
 }
 
 // Clock-in session types
 export interface ClockinSession {
   id: string
-  employeeId: string
+  employee_id: string
   date: string          // "2024-01-15"
-  startTime: string     // "09:00:00" (TIME format)
-  endTime: string       // "10:30:00" (TIME format) 
-  duration: string      // "01:30:00" (PostgreSQL INTERVAL format)
-  hours: number         // 1.5 (calculated from duration)
-  description: string   // "Working on feature X"
-  createdAt: string
+  start_time: string    // "09:00:00" (TIME format)
+  end_time?: string     // "10:30:00" (TIME format) 
+  duration?: string     // "01:30:00" (PostgreSQL INTERVAL format)
+  hours?: number        // 1.5 (calculated from duration)
+  description?: string  // "Working on feature X"
+  created_at: string
 }
 
-
-
-// Daily update types
-export interface DailyUpdate {
-  id: string
-  employeeId: string
-  date: string
-  description: string
-  taskId?: string
-  location?: string
-  screenshotPath?: string
-  createdAt: string
-  updatedAt: string
-}
 
 // Announcement types
 export interface Announcement {
@@ -184,142 +200,76 @@ export interface Announcement {
   title: string
   description: string
   type: string
-  imagePath?: string
+  image_path?: string
   priority: "low" | "medium" | "high"
-  releaseTime: string
+  release_time: string
   archived: boolean
-  createdAt: string
+  created_at: string
 }
 
 export interface AnnouncementRead {
   id: string
-  announcementId: string
-  employeeId: string
+  announcement_id: string
+  employee_id: string
   read: boolean
-  readAt: string
+  read_at: string
 }
 
 // Poll types
 export interface Poll {
   id: string
-  createdDate: string
-  adminId: string
+  created_date: string
+  admin_id: string
   title: string
-  selectionType: "single-choice" | "multi-select"
+  selection_type: "single-choice" | "multi-select"
   anonymous: boolean
-  resultVisibility: "live" | "hidden_until_close"
+  result_visibility: "live" | "hidden_until_close"
   published: boolean
-  closeDate?: string
-  createdAt: string
+  close_date?: string
+  created_at: string
 }
 
 export interface PollOption {
   id: string
-  pollId: string
-  optionText: string
+  poll_id: string
+  option_text: string
   votes: number
-  createdAt: string
+  created_at: string
 }
 
 export interface PollResponse {
   id: string
-  pollId: string
-  pollOptionId: string
-  employeeId: string
-  createdAt: string
+  poll_id: string
+  poll_option_id: string
+  employee_id: string
+  created_at: string
 }
 
 // Public documents types
 export interface PublicDocument {
   id: string
-  visibility: "everyone" | "team-only" | "department-only" | "admin-only"
-  filePath: string
+  visibility: "everyone" | "team-only" | "department-only" | "creator-only" | "admin-only"
+  file_path: string
   type: string
-  uploadDate: string
+  title: string
+  description?: string
+  uploaded_by: string
+  upload_date: string
 }
 
 // Audit log types
 export interface AuditLog {
   id: string
   timestamp: string
-  employeeId?: string
-  actionType: string
-  objectType: string
-  objectId?: string
-  changeSummary?: string
-  createdAt: string
+  employee_id?: string
+  action_type: string
+  object_type: string
+  object_id?: string
+  change_summary?: string
+  created_at: string
 }
 
-// Combined user type for authentication context (combines Account + Employee)
-export interface User {
-  // Account fields
-  accountId: string
-  loginEmail: string
-  accessLevel: "owner" | "admin" | "member"
-  accountStatus: "active" | "inactive" | "suspended"
-  
-  // Employee fields
-  employeeId: string
-  firstName: string
-  lastName: string
-  name: string // computed from firstName + lastName
-  title?: string
-  role?: string
-  teamId?: string
-  departmentId?: string
-  joinDate: string
-  status: "active" | "inactive" | "terminated"
-  overallAssessment?: string
-  phone?: string
-  personalEmail?: string
-  githubEmail?: string
-  zoomEmail?: string
-  note?: string
-  profilePhoto?: string
-  theme: "light" | "dark" | "neon"
-  preferredLanguage: string
-  createdAt: string
-  updatedAt: string
-}
-
-// Legacy compatibility - for components that still use the old User interface
-export interface LegacyUser {
-  uid: string
-  email: string
-  name: string
-  role: "owner" | "admin" | "member"
-  teamId?: string
-  createdAt: string
-  theme?: "light" | "dark" | "neon"
-  profilePhoto?: string
-  displayTitle?: string
-  phoneNumber?: string
-  preferredLanguage: string
-  canViewTeamDailyTasks: boolean
-  canViewUniversalDailyTasks: boolean
-  canViewTeamMoments: boolean
-  canViewUniversalMoments: boolean
-}
-
-
-
-// Convert new User to legacy format for backward compatibility
-export function userToLegacy(user: User): LegacyUser {
-  return {
-    uid: user.accountId,
-    email: user.loginEmail,
-    name: user.name,
-    role: user.accessLevel,
-    teamId: user.teamId,
-    createdAt: user.createdAt,
-    theme: user.theme,
-    profilePhoto: user.profilePhoto,
-    displayTitle: user.title,
-    phoneNumber: user.phone,
-    preferredLanguage: user.preferredLanguage,
-    canViewTeamDailyTasks: false, // Default values for now
-    canViewUniversalDailyTasks: false,
-    canViewTeamMoments: false,
-    canViewUniversalMoments: false,
-  }
+// Helper function to join first and last name
+export function getFullName(firstName: string, lastName: string): string {
+  return `${firstName} ${lastName}`.trim()
 }

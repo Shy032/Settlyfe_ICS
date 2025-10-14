@@ -29,7 +29,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { useTranslation } from "@/lib/i18n"
-import { UserSettings } from "@/components/user-settings"
+import { ProfileSettings } from "@/components/profile-settings"
 import { EventsAnnouncements } from "@/components/events-announcements"
 import { ResizableChat } from "@/components/resizable-chat"
 import { Timer } from "@/components/timer"
@@ -71,8 +71,8 @@ interface LegacyTask {
 }
 
 export default function Dashboard() {
-  const { user, isAdmin, isOwner, signOut, loading: authLoading } = useAuth()
-  const { t } = useTranslation(user?.preferredLanguage as any)
+  const { account, employee, isAdmin, isOwner, signOut, loading: authLoading } = useAuth()
+  const { t } = useTranslation(employee?.preferred_language as any)
   const [scores, setScores] = useState<LegacyScoreData[]>([])
   const [tasks, setTasks] = useState<LegacyTask[]>([])
   const [loading, setLoading] = useState(true)
@@ -86,22 +86,22 @@ export default function Dashboard() {
     // Wait for auth to initialize
     if (authLoading) return
 
-    if (!user) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
 
     loadData()
-  }, [user, router, authLoading])
+  }, [account, employee, router, authLoading])
 
   const loadData = async () => {
-    if (!user) return
+    if (!account || !employee) return
 
     try {
       setLoading(true)
       
       // Load scores from Supabase
-      const { data: scoresData, error: scoresError } = await SupabaseService.getWeeklyScores(user.employeeId, 12)
+      const { data: scoresData, error: scoresError } = await SupabaseService.getWeeklyScores(employee.id, 12)
       if (scoresError) {
         console.error("Error loading scores:", scoresError)
       } else if (scoresData && scoresData.length > 0) {
@@ -122,7 +122,7 @@ export default function Dashboard() {
       }
 
       // Load tasks from Supabase
-      const { data: tasksData, error: tasksError } = await SupabaseService.getTasks(user.teamId, user.employeeId)
+      const { data: tasksData, error: tasksError } = await SupabaseService.getTasks(employee.team_id, employee.id)
       if (tasksError) {
         console.error("Error loading tasks:", tasksError)
       }
@@ -135,7 +135,7 @@ export default function Dashboard() {
           desc: task.description || '',
           dueDate: task.due_date || '',
           ownerUids: [task.admin_id], // For now, admin is the owner
-          teamId: user.teamId || '',
+          teamId: employee.team_id || '',
           createdBy: task.admin_id,
           createdAt: task.created_at,
           progress: 0, // Default for now
@@ -149,7 +149,7 @@ export default function Dashboard() {
         const userTasks =
           isAdmin() || isOwner()
             ? legacyTasks.filter((task) => task.published)
-            : legacyTasks.filter((task) => task.published && task.ownerUids.includes(user.accountId || ""))
+            : legacyTasks.filter((task) => task.published && task.ownerUids.includes(account.id || ""))
         setTasks(userTasks)
       } else {
         // Fallback: try to load from localStorage
@@ -163,7 +163,7 @@ export default function Dashboard() {
             desc: task.desc || task.description || '',
             dueDate: task.dueDate || task.due_date || '',
             ownerUids: task.ownerUids || [task.admin_id] || [],
-            teamId: task.teamId || user.teamId || '',
+            teamId: task.teamId || employee.team_id || '',
             createdBy: task.createdBy || task.admin_id || '',
             createdAt: task.createdAt || task.created_at || new Date().toISOString(),
             progress: task.progress || 0,
@@ -177,7 +177,7 @@ export default function Dashboard() {
           const userTasks =
             isAdmin() || isOwner()
               ? convertedTasks.filter((task) => task.published)
-              : convertedTasks.filter((task) => task.published && task.ownerUids.includes(user.accountId || ""))
+              : convertedTasks.filter((task) => task.published && task.ownerUids.includes(account.id || ""))
           setTasks(userTasks)
         } else {
           // No tasks exist - show empty state
@@ -206,7 +206,7 @@ export default function Dashboard() {
   }
 
   const calculateWeeklyHours = () => {
-    if (!user) return 0
+    if (!account || !employee) return 0
     
     // Get current week's start and end dates
     const now = new Date()
@@ -219,7 +219,7 @@ export default function Dashboard() {
     weekEnd.setHours(23, 59, 59, 999)
     
     // Load hour entries from localStorage
-    const userEntries = localStorage.getItem(`hourEntries_${user.employeeId}`)
+    const userEntries = localStorage.getItem(`hourEntries_${employee.id}`)
     if (!userEntries) return 0
     
     try {
@@ -265,7 +265,7 @@ export default function Dashboard() {
     )
   }
 
-  if (!user) {
+  if (!account || !employee) {
     return null
   }
 
@@ -313,26 +313,31 @@ export default function Dashboard() {
             <div className="flex items-center gap-3">
               <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer" onClick={() => setShowSettings(true)}>
                 <AvatarImage
-                  src={user.profilePhoto || `https://avatar.vercel.sh/${user.loginEmail}.png`}
-                  alt={user.name}
+                  src={employee?.profile_photo || `https://avatar.vercel.sh/${account?.login_email || 'user'}.png`}
+                  alt={`${employee?.first_name || ''} ${employee?.last_name || ''}`}
                 />
-                <AvatarFallback>{user.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                <AvatarFallback>
+                  {(employee?.first_name?.substring(0, 1) || 'U').toUpperCase()}
+                  {(employee?.last_name?.substring(0, 1) || 'U').toUpperCase()}
+                </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
                 <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white neon:text-white truncate select-none">
-                  {user.name || user.loginEmail}
+                  {(employee?.first_name && employee?.last_name) 
+                    ? `${employee.first_name} ${employee.last_name}` 
+                    : account?.login_email || 'User'}
                 </h1>
                 <div className="flex items-center gap-2">
-                  {user.title && (
+                  {employee?.title && (
                     <span className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 neon:text-accent truncate">
-                      {user.title}
+                      {employee.title}
                     </span>
                   )}
                   <Badge
-                    variant={user.accessLevel === "admin" || user.accessLevel === "owner" ? "default" : "outline"}
+                    variant={(account?.access_level === "admin" || account?.access_level === "owner") ? "default" : "outline"}
                     className="dark:border-gray-600 dark:text-gray-300 neon:border-gray-700 text-xs"
                   >
-                    {user.accessLevel}
+                    {account?.access_level || 'member'}
                   </Badge>
                 </div>
               </div>
@@ -393,7 +398,7 @@ export default function Dashboard() {
             <EventsAnnouncements />
             <Timer />
             <PollsSection />
-            <LeaderboardWidget currentUser={user} />
+            <LeaderboardWidget currentUser={employee} />
 
             {/* Task Progress Card */}
             <Card className="dark:bg-gray-800 dark:border-gray-700 neon:bg-card neon:border-gray-800">
@@ -674,7 +679,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <UserSettings open={showSettings} onOpenChange={setShowSettings} />
+      <ProfileSettings open={showSettings} onOpenChange={setShowSettings} />
       <ResizableChat />
     </div>
   )

@@ -13,13 +13,13 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Plus, Calendar, Users, Upload, Eye, EyeOff, History, FileText, Paperclip, Filter, X } from "lucide-react"
+import { Plus, Calendar, Users, Upload, Eye, EyeOff, History, FileText, Paperclip, Filter, X, Globe, Shield, Lock } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
 import { useTranslation } from "@/lib/i18n"
 import { SupabaseService } from "@/lib/supabase"
-import type { Task, User, TaskAttachment, Team } from "@/types"
+import type { Task, Employee, TaskAttachment, Team } from "@/types"
 
 
 import ReactSelect from 'react-select'
@@ -59,10 +59,10 @@ type SelectTeamOption = {
 }
 
 export default function BoardPage() {
-  const { user, isAdmin } = useAuth()
-  const { t } = useTranslation(user?.preferredLanguage as any)
+  const { account, employee, isAdmin } = useAuth()
+  const { t } = useTranslation(employee?.preferred_language as any)
   const [tasks, setTasks] = useState<any[]>([])
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
@@ -73,7 +73,7 @@ export default function BoardPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<FilterType>("all")
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
-  const [visibilityFilter, setVisibilityFilter] = useState<"all" | "everyone" | "team-only">("all")
+  const [visibilityFilter, setVisibilityFilter] = useState<"all" | "everyone" | "team-only" | "creator-only">("all")
 
   const router = useRouter()
 
@@ -83,7 +83,7 @@ export default function BoardPage() {
   const [desc, setDesc] = useState("")
   const [dueDate, setDueDate] = useState("")
   const [priority, setPriority] = useState<"low" | "medium" | "high">("medium")
-  const [visibility, setVisibility] = useState<"everyone" | "team-only">("everyone")
+  const [visibility, setVisibility] = useState<"everyone" | "team-only" | "creator-only">("everyone")
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [selectedTeams, setSelectedTeams] = useState<string[]>([])
   const [attachments, setAttachments] = useState<File[]>([])
@@ -116,88 +116,79 @@ export default function BoardPage() {
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
 
     loadData()
-    setLoading(false)
-  }, [user, router])
+  }, [account, employee, router])
 
 
   const [teamOptions, setTeamOptions] = useState<SelectTeamOption[]>([])
 
   useEffect(() => {
-    const teams = getTeams()
-    const options = teams.map((team) => ({
-      value: team.id,
-      label: team.name,
-    }))
-    setTeamOptions(options)
+    const loadTeams = async () => {
+      const { data: teams, error } = await SupabaseService.getTeams()
+      if (teams && !error) {
+        const options = teams.map((team) => ({
+          value: team.id,
+          label: team.name,
+        }))
+        setTeamOptions(options)
+      } else if (error) {
+        console.error("Error loading teams:", error)
+      }
+    }
+    loadTeams()
   }, [])
 
-  const loadData = () => {
-    if (typeof window !== "undefined") {
-      // Load users
-      const storedUsers = localStorage.getItem("allUsers")
-      if (storedUsers) {
-        setUsers(JSON.parse(storedUsers))
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      
+      // Load employees from database
+      const { data: employeesData, error: employeesError } = await SupabaseService.getEmployees()
+      if (employeesError) {
+        console.error("Error loading employees:", employeesError)
+      } else if (employeesData) {
+        setUsers(employeesData)
       }
 
-      // Load tasks
-      const storedTasks = localStorage.getItem("tasks")
-      if (storedTasks) {
-        const tasksData = JSON.parse(storedTasks) as any[] // Use any to avoid complex type issues
-        // Filter tasks based on visibility and user permissions
-        const visibleTasks = tasksData.filter((task: any) => {
-          if (!user) return false
-
-          if (task.visibility === "everyone") {
-            return true
-          }
-
-          if (task.visibility === "team-only") {
-            if (user.accessLevel === "admin" || user.accessLevel === "owner") {
-              return true
-            }
-            // Check team membership using both old and new fields
-            if ((task.teamId && task.teamId === user.teamId) || 
-                (task.team_id && task.team_id === user.teamId)) {
-              return true
-            }
-            // Check if user is assigned using both old and new fields
-            if ((task.ownerUids && task.ownerUids.includes(user.accountId)) ||
-                (task.adminId === user.accountId) ||
-                (task.admin_id === user.accountId)) {
-              return true
-            }
-          }
-          return false
-        })
-        setTasks(visibleTasks as any[]) // Type assertion for compatibility
+      // Load tasks from database with access control
+      const { data: tasksData, error: tasksError } = await SupabaseService.getTasks(
+        employee?.id,
+        account?.access_level,
+        employee?.team_id
+      )
+      if (tasksError) {
+        console.error("Error loading tasks:", tasksError)
+        setMessage("Failed to load tasks")
+      } else if (tasksData) {
+        console.log("Loaded tasks with access control:", tasksData.length)
+        setTasks(tasksData)
       }
+    } catch (error) {
+      console.error("Error loading data:", error)
+      setMessage("Failed to load data")
+    } finally {
+      setLoading(false)
     }
   }
 
   const getTeamMembers = () => {
-
-    return users.filter((u) => u.teamId === user?.teamId && u.accountId !== user?.accountId)
-
+    if (!employee) return []
+    return users.filter((u) => u.team_id === employee.team_id && u.id !== employee.id)
   }
+  
   const teamMemberOptions: SelectOption[] = getTeamMembers().map((member) => ({
-    value: member.uid,
-    label: member.name,
-    email: member.email,
+    value: member.id,
+    label: `${member.first_name} ${member.last_name}`,
+    email: member.personal_email || member.github_email || "",
   }))
   const [selectedOptions, setSelectedOptions] = useState<SelectOption[]>([])
 
-  const getTeams = (): Team[] => {
-    if (typeof window === "undefined") return []
-    const raw = localStorage.getItem("teams")
-    if (!raw) return []
-    return JSON.parse(raw)
-  }
+
   const [selectedTeamOptions, setSelectedTeamOptions] = useState<SelectTeamOption[]>([])
 
   const handleCreateTask = async (e: React.FormEvent) => {
@@ -207,102 +198,43 @@ export default function BoardPage() {
       return
     }
 
+    if (!employee?.id) {
+      setMessage("Employee information not available. Please try refreshing the page.")
+      return
+    }
+
     setSaving(true)
     setMessage("")
 
     try {
-      // Simulate file uploads - simplified format
-      const taskAttachments = attachments.map((file, index) => ({
-        id: `attachment_${Date.now()}_${index}`,
-        name: file.name,
-        url: URL.createObjectURL(file),
-        type: file.type,
-        uploadedBy: user?.accountId || "",
-        uploadedAt: new Date().toISOString(),
-      }))
-
-      // Create task in both legacy and new schema format for compatibility
-      const newTask = {
-        //id: `task_${Date.now()}`,
-        title,
-
-        description: desc,
-        desc: desc, // Keep both for compatibility
-        dueDate: dueDate,
-        due_date: dueDate, // New schema field
-        adminId: user?.accountId || "",
-        admin_id: user?.employeeId || "", // New schema field
-        ownerUids: selectedUsers.length > 0 ? selectedUsers : [user?.accountId || ""], // Legacy field
-        teamId: user?.teamId || "settlyfe", // Legacy field
-        //createdBy: user?.accountId || "", // Legacy field
-        //createdBy: user?.accountId || "", // Legacy field
-        publishDate: new Date().toISOString(),
-        publish_date: new Date().toISOString(), // New schema field
-
-        createdAt: new Date().toISOString(),
-        created_at: new Date().toISOString(), // New schema field
-        progress: 0, // Legacy field
-        published: true, // Legacy field
-        priority,
-        status: "not-started" as const, // Explicit type assertion
-        visibility,
-        attachments: taskAttachments, // Legacy field
-        attachmentGroupId: attachments.length > 0 ? `attachment_group_${Date.now()}` : undefined,
-        attachment_group_id: attachments.length > 0 ? `attachment_group_${Date.now()}` : undefined, // New schema field
-        isKR: false, // Legacy field
-      }
       console.log("Selected users:", selectedUsers);
-      console.log("New Task Data:", newTask);
 
-      // Save to localStorage for backwards compatibility - use any to avoid type conflicts
-      const existingTasks = localStorage.getItem("tasks")
-      const tasksArray: any[] = existingTasks ? JSON.parse(existingTasks) : []
-      tasksArray.push(newTask)
-      localStorage.setItem("tasks", JSON.stringify(tasksArray))
+       // Save directly to database only
+       const dbTask = {
+         title: title.trim(),
+         description: desc.trim(),
+         due_date: dueDate || undefined,
+         admin_id: employee.id,
+         publish_date: new Date().toISOString(),
+         priority: priority,
+         status: "not-started" as const,
+         visibility: visibility,
+         attachment_group_id: attachments.length > 0 ? `attachment_group_${Date.now()}` : undefined,
+         progress: 0,
+         is_key_result: false,
+         published: true,
+       }
 
-      // Save to Supabase database (non-blocking) - use only new schema fields
-      setTimeout(async () => {
-        try {
-          /**const dbTask = {
-            id: newTask.id,
-            title: newTask.title,
-            description: newTask.description,
-            due_date: newTask.due_date,
-            admin_id: newTask.admin_id,
-            publish_date: newTask.publish_date,
-            priority: newTask.priority,
-            status: newTask.status,
-            visibility: newTask.visibility,
-            attachment_group_id: newTask.attachment_group_id,
-            created_at: newTask.created_at,
-          }**/
-          const dbTask = {
-            //id: newTask.id,
-            title: newTask.title ?? "Untitled Task",
-            description: newTask.description ?? "",
-            due_date: newTask.due_date || null,
-            admin_id: newTask.admin_id || "unknown_admin",
-            publish_date: newTask.publish_date || new Date().toISOString(),
-            priority: newTask.priority || "medium",
-            status: newTask.status || "not-started",
-            visibility: newTask.visibility || "everyone",
-            attachment_group_id: newTask.attachment_group_id || null,
-            created_at: newTask.created_at || new Date().toISOString(),
-          }
-
-
-          console.log("Attempting to save task to database:", dbTask)
-          
-          const { data: dbData, error: dbError } = await SupabaseService.createTask(dbTask)
-          if (dbError) {
-            console.error("Database task save error:", dbError)
-          } else {
-            console.log("Successfully saved task to database:", dbData)
-          }
-        } catch (dbErr) {
-          console.error("Database task save failed:", dbErr)
-        }
-      },100)
+       console.log("Saving task to database:", dbTask)
+       
+       const { data: dbData, error: dbError } = await SupabaseService.createTask(dbTask)
+       if (dbError) {
+         console.error("Database task save error:", dbError)
+         setMessage("Failed to create task in database")
+         return
+       } else {
+         console.log("Successfully saved task to database:", dbData)
+       }
 
       setMessage("Task created successfully!")
       loadData()
@@ -324,78 +256,69 @@ export default function BoardPage() {
     }
   }
 
-  const handleDeleteTask = (taskId: string) => {
-  const updatedTasks = tasks.filter((task) => task.id !== taskId);
-  setTasks(updatedTasks);
+  const handleDeleteTask = async (taskId: string) => {
+    if (!taskId || taskId === 'undefined') {
+      console.error('Invalid task ID for deletion:', taskId)
+      setMessage('Cannot delete task: Invalid task ID')
+      return
+    }
 
-  const storedTasks = localStorage.getItem("tasks");
-  if (storedTasks) {
-    const allTasks = JSON.parse(storedTasks) as Task[];
-    const updatedAllTasks = allTasks.filter((task) => task.id !== taskId);
-    localStorage.setItem("tasks", JSON.stringify(updatedAllTasks));
-  }
+    try {
+      // Delete from database
+      const { error } = await SupabaseService.deleteTask(taskId, employee?.id)
+      
+      if (error) {
+        console.error('Failed to delete task from database:', error)
+        setMessage('Failed to delete task from database')
+        return
+      }
 
-  setSelectedTask(null);
-};
+      // Refresh data from database after successful deletion
+      await loadData()
+      setSelectedTask(null);
+      setMessage('Task deleted successfully');
+    } catch (error) {
+      console.error('Error deleting task:', error)
+      setMessage('Error deleting task')
+    }
+  };
 
-  const handleStatusChange = (
+  const handleStatusChange = async (
     taskId: string,
     newStatus: "not-started" | "in-progress" | "done",
     newProgress?: number
   ) => {
-    const updatedTasks = tasks.map((task) => {
-      if (task.id === taskId) {
-        const progress =
-          typeof newProgress === "number"
-            ? newProgress
-            : newStatus === "done"
-            ? 100
-            : 0;
-
-        return {
-          ...task,
-
-          status: newStatus === "done" ? "completed" : newStatus,
-          progress: newStatus === "done" ? 100 : newStatus === "in-progress" ? 50 : 0,
-          completedAt: newStatus === "done" ? new Date().toISOString() : undefined,
-          completionDate: newStatus === "done" ? new Date().toISOString() : undefined,
-        }
-        return updatedTask
+    // Update task status in database
+    try {
+      const progress = typeof newProgress === "number" ? newProgress : newStatus === "done" ? 100 : newStatus === "in-progress" ? 50 : 0;
+      
+      // Convert frontend status to database status
+      const dbStatus = newStatus === "done" ? "completed" : newStatus;
+      
+      const updateData = {
+        status: dbStatus as "not-started" | "in-progress" | "completed",
+        progress: progress,
+        completion_date: newStatus === "done" ? new Date().toISOString().split('T')[0] : undefined,
       }
-      return task
-    })
-    
-    setSelectedTask((prev: any) =>
-      prev && prev.id === taskId ? { ...prev, status: newStatus === "done" ? "completed" : newStatus } : prev
-    )
 
-
-    setTasks(updatedTasks);
-
-    const storedTasks = localStorage.getItem("tasks");
-    if (storedTasks) {
-      const allTasks = JSON.parse(storedTasks) as Task[];
-      const updatedAllTasks = allTasks.map((task) => {
-        if (task.id === taskId) {
-          const progress =
-            typeof newProgress === "number"
-              ? newProgress
-              : newStatus === "done"
-              ? 100
-              : 0;
-
-          return {
-            ...task,
-            status: newStatus === "done" ? "completed" : newStatus,
-            progress: newStatus === "done" ? 100 : newStatus === "in-progress" ? 50 : 0,
-            completedAt: newStatus === "done" ? new Date().toISOString() : undefined,
-            completionDate: newStatus === "done" ? new Date().toISOString() : undefined,
-          }
-
-        }
-        return task;
-      });
-      localStorage.setItem("tasks", JSON.stringify(updatedAllTasks));
+      const { error } = await SupabaseService.updateTask(taskId, updateData)
+      if (error) {
+        console.error('Failed to update task status:', error)
+        setMessage('Failed to update task status')
+        return
+      } else {
+        console.log('Task status updated successfully')
+        // Refresh tasks from database
+        await loadData()
+        
+        // Update selected task for UI consistency
+        setSelectedTask((prev: any) =>
+          prev && prev.id === taskId ? { ...prev, status: dbStatus, progress } : prev
+        )
+      }
+    } catch (error) {
+      console.error('Error updating task status:', error)
+      setMessage('Error updating task status')
     }
   }
   
@@ -405,23 +328,26 @@ export default function BoardPage() {
   }
 
   const getUserName = (uid: string) => {
-    return users.find((u) => u.accountId === uid)?.name || "Unknown"
+    const user = users.find((u) => u.id === uid)
+    return user ? `${user.first_name} ${user.last_name}` : "Unknown"
   }
 
   const getFilteredTasks = () => {
     let filteredTasks = tasks
 
-    // Assignee filter - handle both legacy and new fields
+    // Assignee filter
     if (assigneeFilter === "mine") {
       filteredTasks = filteredTasks.filter((task) => 
-        (task.ownerUids && task.ownerUids.includes(user?.accountId || "")) ||
-        task.adminId === user?.accountId
+        task.admin_id === employee?.id
       )
     } else if (assigneeFilter === "team") {
-      filteredTasks = filteredTasks.filter((task) => 
-        (task.teamId && task.teamId === user?.teamId) ||
-        true // For now, show all team tasks
-      )
+      // Filter tasks created by team members
+      filteredTasks = filteredTasks.filter((task) => {
+        if (task.admin && task.admin.team_id === employee?.team_id) {
+          return true
+        }
+        return false
+      })
     }
 
     // Priority filter
@@ -429,11 +355,11 @@ export default function BoardPage() {
       filteredTasks = filteredTasks.filter((task) => task.priority === priorityFilter)
     }
 
-    // Status filter - handle both "done" and "completed"
+    // Status filter - map frontend status to database status
     if (statusFilter !== "all") {
       filteredTasks = filteredTasks.filter((task) => {
         if (statusFilter === "done") {
-          return task.status === "done" || task.status === "completed"
+          return task.status === "completed"
         }
         return task.status === statusFilter
       })
@@ -444,7 +370,7 @@ export default function BoardPage() {
       filteredTasks = filteredTasks.filter((task) => task.visibility === visibilityFilter)
     }
 
-    // Done time filter: only apply when task is "done" or "completed"
+    // Done time filter: only apply when task is "completed"
     if (doneFilter !== "all") {
       const now = new Date()
       const thresholdMs =
@@ -453,10 +379,10 @@ export default function BoardPage() {
         doneFilter === "30d" ? 30 * 86400000 : 0
 
       filteredTasks = filteredTasks.filter((task) => {
-        const isDone = task.status === "done" || task.status === "completed"
+        const isDone = task.status === "completed"
         if (!isDone) return true
         
-        const completedAt = task.completedAt || task.completionDate
+        const completedAt = task.completion_date
         if (!completedAt) return true
         
         const completedDate = new Date(completedAt)
@@ -472,21 +398,16 @@ export default function BoardPage() {
     const filteredTasks = getFilteredTasks()
     const notStarted = filteredTasks.filter((task) => task.status === "not-started")
     const inProgress = filteredTasks.filter((task) => task.status === "in-progress")
-    const done = filteredTasks.filter((task) => task.status === "done" || task.status === "completed")
+    const done = filteredTasks.filter((task) => task.status === "completed")
 
     return { notStarted, inProgress, done }
   }
 
   const getCompletedTasks = () => {
-    const storedTasks = localStorage.getItem("tasks")
-    if (storedTasks) {
-      const allTasks = JSON.parse(storedTasks) as any[]
-      return allTasks.filter((task) => 
-        (task.status === "done" || task.status === "completed") && 
-        (task.completedAt || task.completionDate)
-      )
-    }
-    return []
+    return tasks.filter((task) => 
+      task.status === "completed" && 
+      (task.completion_date)
+    )
   }
 
   const clearFilters = () => {
@@ -528,8 +449,17 @@ export default function BoardPage() {
                 variant="outline"
                 className="dark:border-gray-600 dark:text-gray-300 neon:border-secondary neon:text-secondary"
               >
-                <EyeOff className="h-3 w-3 mr-1" />
+                <Users className="h-3 w-3 mr-1" />
                 Team
+              </Badge>
+            )}
+            {task.visibility === "creator-only" && (
+              <Badge
+                variant="outline"
+                className="dark:border-blue-600 dark:text-blue-300 neon:border-accent neon:text-accent"
+              >
+                <Eye className="h-3 w-3 mr-1" />
+                Private
               </Badge>
             )}
           </div>
@@ -543,10 +473,10 @@ export default function BoardPage() {
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             <span className="dark:text-gray-300 neon:text-foreground">
-              Due: {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "No due date"}
+              Due: {task.due_date ? new Date(task.due_date).toLocaleDateString() : "No due date"}
             </span>
           </div>
-          {task.dueDate && new Date(task.dueDate) < new Date() && task.status !== "done" && task.status !== "completed" && (
+          {task.due_date && new Date(task.due_date) < new Date() && task.status !== "completed" && (
             <Badge variant="destructive" className="neon:bg-secondary neon:text-background">
               Overdue
             </Badge>
@@ -571,15 +501,12 @@ export default function BoardPage() {
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4" />
           <div className="flex flex-wrap gap-1">
-            {(task.ownerUids || [task.adminId || task.admin_id]).filter(Boolean).map((uid: string) => (
-              <Badge
-                key={uid}
-                variant="outline"
-                className="text-xs dark:border-gray-600 dark:text-gray-300 neon:border-accent neon:text-accent"
-              >
-                {getUserName(uid)}
-              </Badge>
-            ))}
+            <Badge
+              variant="outline"
+              className="text-xs dark:border-gray-600 dark:text-gray-300 neon:border-accent neon:text-accent"
+            >
+              {getUserName(task.admin_id)}
+            </Badge>
           </div>
         </div>
 
@@ -593,8 +520,8 @@ export default function BoardPage() {
         )}
 
         <div className="text-xs text-gray-500 dark:text-gray-400 neon:text-muted-foreground">
-          Created by {getUserName(task.createdBy || task.adminId || task.admin_id)} on{" "}
-          {new Date(task.createdAt || task.created_at).toLocaleDateString()}
+          Created by {getUserName(task.admin_id)} on{" "}
+          {new Date(task.created_at).toLocaleDateString()}
         </div>
       </CardContent>
     </Card>
@@ -715,7 +642,7 @@ export default function BoardPage() {
               size="sm"
               onClick={() => setVisibilityFilter("everyone")}
             >
-              <Eye className="h-3 w-3 mr-1" />
+              <Globe className="h-3 w-3 mr-1" />
               Public
             </Button>
             <Button
@@ -723,8 +650,16 @@ export default function BoardPage() {
               size="sm"
               onClick={() => setVisibilityFilter("team-only")}
             >
-              <EyeOff className="h-3 w-3 mr-1" />
+              <Users className="h-3 w-3 mr-1" />
               Team Only
+            </Button>
+            <Button
+              variant={visibilityFilter === "creator-only" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setVisibilityFilter("creator-only")}
+            >
+              <Eye className="h-3 w-3 mr-1" />
+              Creator Only
             </Button>
 
             {/* Status Filter */}
@@ -795,7 +730,9 @@ export default function BoardPage() {
         {/* Kanban Board */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {Object.entries(STATUS_COLUMNS).map(([status, title]) => {
-            const columnTasks = getFilteredTasks().filter((task) => task.status === status)
+            // Map frontend status to database status for filtering
+            const dbStatus = status === "done" ? "completed" : status
+            const columnTasks = getFilteredTasks().filter((task) => task.status === dbStatus)
             return (
               <div key={status}>
                 <div className="flex justify-between items-center mb-4">
@@ -835,7 +772,7 @@ export default function BoardPage() {
                       No tasks in this column
                     </Card>
                   ) : (
-                    columnTasks.map((task) => <TaskCard key={task.id} task={task} />)
+                    columnTasks.map((task, index) => <TaskCard key={task.id || `task-${index}`} task={task} />)
                   )}
                 </div>
               </div>
@@ -918,21 +855,27 @@ export default function BoardPage() {
               <Label htmlFor="visibility" className="dark:text-gray-200 neon:text-foreground">
                 Visibility
               </Label>
-              <Select value={visibility} onValueChange={(value: "everyone" | "team-only") => setVisibility(value)}>
+              <Select value={visibility} onValueChange={(value: "everyone" | "team-only" | "creator-only") => setVisibility(value)}>
                 <SelectTrigger className="dark:bg-gray-700 dark:border-gray-600 dark:text-white neon:bg-background neon:border-border neon:text-foreground">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="dark:bg-gray-700 dark:border-gray-600 neon:bg-card neon:border-border">
                   <SelectItem value="everyone">
                     <div className="flex items-center gap-2">
-                      <Eye className="h-4 w-4" />
+                      <Globe className="h-4 w-4" />
                       {t("everyone")} - Everyone can see
                     </div>
                   </SelectItem>
                   <SelectItem value="team-only">
                     <div className="flex items-center gap-2">
-                      <EyeOff className="h-4 w-4" />
+                      <Users className="h-4 w-4" />
                       {t("teamOnly")} - Restricted access
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="creator-only">
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-4 w-4" />
+                      Task Creator Only - Only you can see
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -1191,7 +1134,7 @@ export default function BoardPage() {
                 <div>
                   <Label className="dark:text-gray-200 neon:text-foreground">Status</Label>
                   <Select
-                    value={selectedTask.status}
+                    value={selectedTask.status === "completed" ? "done" : selectedTask.status}
                     onValueChange={(value: "not-started" | "in-progress" | "done") =>
                       handleStatusChange(selectedTask.id, value)
                     }
@@ -1249,17 +1192,14 @@ export default function BoardPage() {
                 )}
 
                 <div>
-                  <Label className="dark:text-gray-200 neon:text-foreground">Assignees</Label>
+                  <Label className="dark:text-gray-200 neon:text-foreground">Created By</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {(selectedTask.ownerUids || []).map((uid: string) => (
-                      <Badge
-                        key={uid}
-                        variant="outline"
-                        className="dark:border-gray-600 dark:text-gray-300 neon:border-accent neon:text-accent"
-                      >
-                        {getUserName(uid)}
-                      </Badge>
-                    ))}
+                    <Badge
+                      variant="outline"
+                      className="dark:border-gray-600 dark:text-gray-300 neon:border-accent neon:text-accent"
+                    >
+                      {getUserName(selectedTask.admin_id)}
+                    </Badge>
                   </div>
                 </div>
 
@@ -1287,9 +1227,11 @@ export default function BoardPage() {
                   </div>
                 )}
 
-                <Button onClick={() => selectedTask && handleDeleteTask(selectedTask.id)}
-                className="neon:bg-primary neon:text-background neon:glow-primary bg-red-500 hover:bg-red-700 w-full">
-                  Delete Task
+                <Button 
+                  onClick={() => selectedTask?.id && handleDeleteTask(selectedTask.id)}
+                  disabled={!selectedTask?.id}
+                  className="neon:bg-primary neon:text-background neon:glow-primary bg-red-500 hover:bg-red-700 w-full disabled:bg-gray-400 disabled:cursor-not-allowed">
+                  {selectedTask?.id ? 'Delete Task' : 'Cannot Delete (No ID)'}
                 </Button>
               </div>
             </>
@@ -1336,8 +1278,8 @@ export default function BoardPage() {
                       <div>
                         <span className="font-medium dark:text-gray-200 neon:text-foreground">Completed:</span>{" "}
                         <span className="dark:text-gray-300 neon:text-muted-foreground">
-                          {(task.completedAt || task.completionDate || task.completion_date) 
-                            ? new Date(task.completedAt || task.completionDate || task.completion_date).toLocaleDateString() 
+                          {task.completion_date 
+                            ? new Date(task.completion_date).toLocaleDateString() 
                             : "N/A"}
                         </span>
                       </div>
@@ -1346,15 +1288,9 @@ export default function BoardPage() {
                         <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
                       </div>
                       <div>
-                        <span className="font-medium dark:text-gray-200 neon:text-foreground">Assignees:</span>{" "}
-                        <span className="dark:text-gray-300 neon:text-muted-foreground">
-                          {(task.ownerUids || [task.adminId || task.admin_id]).filter(Boolean).map((uid: string) => getUserName(uid)).join(", ")}
-                        </span>
-                      </div>
-                      <div>
                         <span className="font-medium dark:text-gray-200 neon:text-foreground">Created by:</span>{" "}
                         <span className="dark:text-gray-300 neon:text-muted-foreground">
-                          {getUserName(task.createdBy || task.adminId || task.admin_id)}
+                          {getUserName(task.admin_id)}
                         </span>
                       </div>
                     </div>

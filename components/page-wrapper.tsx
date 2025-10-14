@@ -10,16 +10,16 @@ interface PageWrapperProps {
 }
 
 export function PageWrapper({ children, className = "" }: PageWrapperProps) {
-  const { user } = useAuth()
+  const { employee } = useAuth()
 
   useEffect(() => {
     // Ensure theme is applied on page load
-    if (user?.theme) {
+    if (employee?.theme) {
       const root = document.documentElement
       root.classList.remove("light", "dark", "neon")
-      root.classList.add(user.theme)
+      root.classList.add(employee.theme)
     }
-  }, [user?.theme])
+  }, [employee?.theme])
 
   return <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${className}`}>{children}</div>
 }

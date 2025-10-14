@@ -15,11 +15,11 @@ import { Users, Plus, Target, Send } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
-import type { Task, User, Team } from "@/types"
+import type { Task, Employee, Team } from "@/types"
 
 export default function AssignPage() {
-  const { user, isAdmin, isOwner } = useAuth()
-  const [users, setUsers] = useState<User[]>([])
+  const { account, employee, isAdmin, isOwner } = useAuth()
+  const [users, setUsers] = useState<Employee[]>([])
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -36,7 +36,7 @@ export default function AssignPage() {
   const [published, setPublished] = useState(false)
 
   useEffect(() => {
-    if (!user) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
@@ -49,13 +49,13 @@ export default function AssignPage() {
 
     loadData()
     setLoading(false)
-  }, [user, router, isAdmin, isOwner])
+  }, [account, employee, router, isAdmin, isOwner])
 
   const loadData = () => {
     if (typeof window !== "undefined") {
       const storedUsers = localStorage.getItem("allUsers")
       if (storedUsers) {
-        const usersData = JSON.parse(storedUsers) as User[]
+        const usersData = JSON.parse(storedUsers) as Employee[]
         const members = usersData.filter((u) => u.role === "member")
         setUsers(members)
       }
@@ -74,7 +74,7 @@ export default function AssignPage() {
   const handleTeamSelect = (teamId: string) => {
     setSelectedTeam(teamId)
     // Auto-select all members of the team
-    const teamMembers = users.filter((u) => u.teamId === teamId).map((u) => u.uid)
+    const teamMembers = users.filter((u) => u.team_id === teamId).map((u) => u.id)
     setSelectedUsers(teamMembers)
   }
 
@@ -92,18 +92,17 @@ export default function AssignPage() {
       const newTask: Task = {
         id: `task_${Date.now()}`,
         title,
-        desc,
-        dueDate,
-        ownerUids: selectedUsers,
-        teamId: selectedTeam || "settlyfe",
-        createdBy: user?.uid || "",
-        createdAt: new Date().toISOString(),
-        progress: 0,
-        isKR,
-        published,
+        description: desc,
+        due_date: dueDate,
+        admin_id: employee?.id || "",
+        publish_date: new Date().toISOString(),
         priority: "low",
         status: "not-started",
-        visibility: "everyone"
+        visibility: "everyone",
+        progress: 0,
+        is_key_result: isKR,
+        published,
+        created_at: new Date().toISOString()
       }
 
       // Get existing tasks
@@ -143,7 +142,7 @@ export default function AssignPage() {
     )
   }
 
-  const filteredUsers = selectedTeam ? users.filter((u) => u.teamId === selectedTeam) : users
+  const filteredUsers = selectedTeam ? users.filter((u) => u.team_id === selectedTeam) : users
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -220,7 +219,7 @@ export default function AssignPage() {
                       <SelectItem value="none">Individual Assignment</SelectItem>
                       {teams.map((team) => (
                         <SelectItem key={team.id} value={team.id}>
-                          {team.name} ({users.filter((u) => u.teamId === team.id).length} members)
+                          {team.name} ({users.filter((u) => u.team_id === team.id).length} members)
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -286,22 +285,22 @@ export default function AssignPage() {
                 ) : (
                   filteredUsers.map((member) => (
                     <div
-                      key={member.uid}
+                      key={member.id}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedUsers.includes(member.uid) ? "bg-blue-50 border-blue-200" : "hover:bg-gray-50"
+                        selectedUsers.includes(member.id) ? "bg-blue-50 border-blue-200" : "hover:bg-gray-50"
                       }`}
-                      onClick={() => handleUserToggle(member.uid)}
+                      onClick={() => handleUserToggle(member.id)}
                     >
                       <div className="flex items-center space-x-2">
                         <Checkbox
-                          checked={selectedUsers.includes(member.uid)}
-                          onChange={() => handleUserToggle(member.uid)}
+                          checked={selectedUsers.includes(member.id)}
+                          onChange={() => handleUserToggle(member.id)}
                         />
                         <div>
-                          <div className="font-medium">{member.name}</div>
-                          <div className="text-sm text-gray-600">{member.email}</div>
+                          <div className="font-medium">{member.first_name} {member.last_name}</div>
+                          <div className="text-sm text-gray-600">{member.personal_email || member.github_email}</div>
                           <div className="text-xs text-gray-500">
-                            Team: {teams.find((t) => t.id === member.teamId)?.name || "No team"}
+                            Team: {teams.find((t) => t.id === member.team_id)?.name || "No team"}
                           </div>
                         </div>
                       </div>

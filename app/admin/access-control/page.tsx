@@ -11,18 +11,18 @@ import { ArrowLeft, Shield, Users, Eye, EyeOff } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
-import type { User } from "@/types"
+import type { Employee } from "@/types"
 
 export default function AccessControlPage() {
-  const { user: currentUser, isAdmin, isOwner } = useAuth()
-  const [users, setUsers] = useState<User[]>([])
+  const { account, employee, isAdmin, isOwner } = useAuth()
+  const [users, setUsers] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const router = useRouter()
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
@@ -34,31 +34,28 @@ export default function AccessControlPage() {
 
     loadUsers()
     setLoading(false)
-  }, [currentUser, router, isAdmin, isOwner])
+  }, [account, employee, router, isAdmin, isOwner])
 
   const loadUsers = () => {
     if (typeof window !== "undefined") {
       const storedUsers = localStorage.getItem("allUsers")
       if (storedUsers) {
-        const usersData = JSON.parse(storedUsers) as User[]
+        const usersData = JSON.parse(storedUsers) as Employee[]
         const otherUsers = usersData
-          .filter((u) => u.uid !== currentUser?.uid)
-          .sort((a, b) => {
-            const roleOrder = { owner: 0, admin: 1, member: 2 }
-            return roleOrder[a.role] - roleOrder[b.role]
-          })
+          .filter((u) => u.id !== employee?.id)
+          .sort((a, b) => a.first_name.localeCompare(b.first_name))
         setUsers(otherUsers)
       }
     }
   }
 
-  const updateUserAccess = async (userId: string, field: keyof User, value: boolean) => {
+  const updateUserAccess = async (userId: string, field: keyof Employee, value: boolean) => {
     setSaving(true)
     setMessage("")
 
     try {
       const updatedUsers = users.map((user) => {
-        if (user.uid === userId) {
+        if (user.id === userId) {
           return { ...user, [field]: value }
         }
         return user
@@ -67,9 +64,9 @@ export default function AccessControlPage() {
 
       const storedUsers = localStorage.getItem("allUsers")
       if (storedUsers) {
-        const allUsers = JSON.parse(storedUsers) as User[]
+        const allUsers = JSON.parse(storedUsers) as Employee[]
         const updatedAllUsers = allUsers.map((user) => {
-          if (user.uid === userId) {
+          if (user.id === userId) {
             return { ...user, [field]: value }
           }
           return user
@@ -146,23 +143,23 @@ export default function AccessControlPage() {
             </Card>
           ) : (
             users.map((user) => (
-              <Card key={user.uid}>
+              <Card key={user.id}>
                 <CardHeader className="pb-3 sm:pb-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                         <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
-                        {user.name}
+                        {user.first_name} {user.last_name}
                       </CardTitle>
-                      <CardDescription className="text-sm">{user.email}</CardDescription>
+                      <CardDescription className="text-sm">{user.personal_email || user.github_email}</CardDescription>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant={user.role === "admin" ? "default" : "secondary"} className="text-xs">
                         {user.role}
                       </Badge>
-                      {user.teamId && (
+                      {user.team_id && (
                         <Badge variant="outline" className="text-xs">
-                          Team: {user.teamId}
+                          Team: {user.team_id}
                         </Badge>
                       )}
                     </div>
@@ -180,15 +177,15 @@ export default function AccessControlPage() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex-1">
-                            <Label htmlFor={`team-tasks-${user.uid}`} className="text-sm font-medium cursor-pointer">
+                            <Label htmlFor={`team-tasks-${user.id}`} className="text-sm font-medium cursor-pointer">
                               View Team Daily Tasks
                             </Label>
                             <p className="text-xs text-muted-foreground mt-1">Can see daily tasks from team members</p>
                           </div>
                           <Switch
-                            id={`team-tasks-${user.uid}`}
-                            checked={user.canViewTeamDailyTasks ?? true}
-                            onCheckedChange={(checked) => updateUserAccess(user.uid, "canViewTeamDailyTasks", checked)}
+                            id={`team-tasks-${user.id}`}
+                            checked={user.can_view_team_daily_tasks ?? true}
+                            onCheckedChange={(checked) => updateUserAccess(user.id, "can_view_team_daily_tasks", checked)}
                             disabled={saving}
                           />
                         </div>
@@ -196,7 +193,7 @@ export default function AccessControlPage() {
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex-1">
                             <Label
-                              htmlFor={`universal-tasks-${user.uid}`}
+                              htmlFor={`universal-tasks-${user.id}`}
                               className="text-sm font-medium cursor-pointer"
                             >
                               View Universal Daily Tasks
@@ -204,12 +201,12 @@ export default function AccessControlPage() {
                             <p className="text-xs text-muted-foreground mt-1">Can see daily tasks from all users</p>
                           </div>
                           <Switch
-                            id={`universal-tasks-${user.uid}`}
+                            id={`universal-tasks-${user.id}`}
                             checked={
-                              user.canViewUniversalDailyTasks ?? (user.role === "admin" || user.role === "owner")
+                              user.can_view_universal_daily_tasks ?? (user.role === "admin" || user.role === "owner")
                             }
                             onCheckedChange={(checked) =>
-                              updateUserAccess(user.uid, "canViewUniversalDailyTasks", checked)
+                              updateUserAccess(user.id, "can_view_universal_daily_tasks", checked)
                             }
                             disabled={saving}
                           />
@@ -227,15 +224,15 @@ export default function AccessControlPage() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex-1">
-                            <Label htmlFor={`team-moments-${user.uid}`} className="text-sm font-medium cursor-pointer">
+                            <Label htmlFor={`team-moments-${user.id}`} className="text-sm font-medium cursor-pointer">
                               View Team Moments
                             </Label>
                             <p className="text-xs text-muted-foreground mt-1">Can see moments from team members</p>
                           </div>
                           <Switch
-                            id={`team-moments-${user.uid}`}
-                            checked={user.canViewTeamMoments ?? true}
-                            onCheckedChange={(checked) => updateUserAccess(user.uid, "canViewTeamMoments", checked)}
+                            id={`team-moments-${user.id}`}
+                            checked={user.can_view_team_moments ?? true}
+                            onCheckedChange={(checked) => updateUserAccess(user.id, "can_view_team_moments", checked)}
                             disabled={saving}
                           />
                         </div>
@@ -243,7 +240,7 @@ export default function AccessControlPage() {
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex-1">
                             <Label
-                              htmlFor={`universal-moments-${user.uid}`}
+                              htmlFor={`universal-moments-${user.id}`}
                               className="text-sm font-medium cursor-pointer"
                             >
                               View Universal Moments
@@ -251,10 +248,10 @@ export default function AccessControlPage() {
                             <p className="text-xs text-muted-foreground mt-1">Can see moments from all users</p>
                           </div>
                           <Switch
-                            id={`universal-moments-${user.uid}`}
-                            checked={user.canViewUniversalMoments ?? (user.role === "admin" || user.role === "owner")}
+                            id={`universal-moments-${user.id}`}
+                            checked={user.can_view_universal_moments ?? (user.role === "admin" || user.role === "owner")}
                             onCheckedChange={(checked) =>
-                              updateUserAccess(user.uid, "canViewUniversalMoments", checked)
+                              updateUserAccess(user.id, "can_view_universal_moments", checked)
                             }
                             disabled={saving}
                           />

@@ -4,15 +4,15 @@ import { useEffect } from "react"
 import { useAuth } from "@/contexts/auth-context"
 
 export function ThemeEnforcer() {
-  const { user } = useAuth()
+  const { employee } = useAuth()
 
   useEffect(() => {
-    if (user?.theme) {
+    if (employee?.theme) {
       const root = document.documentElement
       root.classList.remove("light", "dark")
-      root.classList.add(user.theme === "neon" ? "light" : user.theme)
+      root.classList.add(employee.theme)
     }
-  }, [user?.theme])
+  }, [employee?.theme])
 
   return null
 }

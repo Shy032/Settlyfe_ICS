@@ -92,7 +92,7 @@ export default function CreditSystemPage() {
       } else {
         // Create default teams if none exist
         const defaultTeams: Team[] = [
-          { id: "settlyfe", name: "Settlyfe", leadUid: currentUser?.uid || "", createdAt: new Date().toISOString() },
+          { id: "settlyfe", name: "Settlyfe", leadEmployeeId: currentUser?.employeeId || "", createdAt: new Date().toISOString() },
         ]
         setTeams(defaultTeams)
         localStorage.setItem("allTeams", JSON.stringify(defaultTeams))
@@ -132,7 +132,7 @@ export default function CreditSystemPage() {
       }
 
       // Check permissions
-      if (!isOwner() && selectedTeam.leadUid !== currentUser.uid) {
+      if (!isOwner() && selectedTeam.leadEmployeeId !== currentUser.employeeId) {
         setMessage("Error: You can only modify your own team's settings")
         return
       }
@@ -145,7 +145,7 @@ export default function CreditSystemPage() {
           OC: Number.parseInt(ocWeight),
           CC: Number.parseInt(ccWeight),
         },
-        updatedBy: currentUser.uid,
+        updatedBy: currentUser.employeeId || "",
         updatedAt: new Date().toISOString(),
       }
 
@@ -180,7 +180,7 @@ export default function CreditSystemPage() {
     setMessage("")
 
     try {
-      const selectedUser = users.find((u) => u.uid === selectedUserId)
+      const selectedUser = users.find((u) => u.employeeId === selectedUserId)
       if (!selectedUser) {
         setMessage("Error: User not found")
         return
@@ -198,7 +198,7 @@ export default function CreditSystemPage() {
         teamId: selectedUser.teamId,
         performanceMultiplier: multiplier,
         notes: ratingNotes,
-        updatedBy: currentUser.uid,
+        updatedBy: currentUser.employeeId || "",
         updatedAt: new Date().toISOString(),
       }
 
@@ -231,12 +231,12 @@ export default function CreditSystemPage() {
 
   const getAvailableTeams = () => {
     if (isOwner()) return teams
-    return teams.filter((t) => t.leadUid === currentUser?.uid)
+    return teams.filter((t) => t.leadEmployeeId === currentUser?.employeeId)
   }
 
   const getAvailableUsers = () => {
-    if (isOwner()) return users.filter((u) => u.uid !== currentUser?.uid)
-    return users.filter((u) => u.teamId === currentUser?.teamId && u.uid !== currentUser?.uid)
+    if (isOwner()) return users.filter((u) => u.employeeId !== currentUser?.employeeId)
+    return users.filter((u) => u.teamId === currentUser?.teamId && u.employeeId !== currentUser?.employeeId)
   }
 
   if (loading) {
@@ -460,7 +460,7 @@ export default function CreditSystemPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {getAvailableUsers().map((user) => (
-                        <SelectItem key={user.uid} value={user.uid}>
+                        <SelectItem key={user.employeeId} value={user.employeeId}>
                           {user.name} ({user.role})
                         </SelectItem>
                       ))}

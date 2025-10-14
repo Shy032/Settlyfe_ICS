@@ -27,42 +27,11 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Eye, Trash2 } from "lucide-react"
 import { UserWeeklyUpdatesDialog } from "@/components/admin/user-weekly-updates-dialog"
-import type { User as AppUser, ScoreData as AppScoreData } from "@/types"
-
-const MOCK_USERS: AppUser[] = [
-  {
-    uid: "admin_settlyfe_com",
-    name: "Admin User",
-    email: "admin@settlyfe.com",
-    role: "owner",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    uid: "user01_settlyfe_com",
-    name: "John Doe",
-    email: "user01@settlyfe.com",
-    role: "member",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    uid: "user02_settlyfe_com",
-    name: "Jane Smith",
-    email: "user02@settlyfe.com",
-    role: "member",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    uid: "bakeryang_settlyfe_com",
-    name: "Baker Yang",
-    email: "bakeryang@settlyfe.com",
-    role: "admin",
-    createdAt: new Date().toISOString(),
-  },
-]
+import type { User as AppUser, WeeklyCreditScore as AppScoreData } from "@/types"
 
 export default function AdminPanel() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null)
-  const [users, setUsers] = useState<AppUser[]>(MOCK_USERS)
+  const [users, setUsers] = useState<AppUser[]>([])
   const [selectedUserUid, setSelectedUserUid] = useState<string>("")
   const [scores, setScores] = useState<AppScoreData[]>([])
   const [saving, setSaving] = useState(false)
@@ -98,11 +67,7 @@ export default function AdminPanel() {
       setCurrentUser(userData)
 
       const allStoredUsers = localStorage.getItem("allUsers")
-      if (allStoredUsers) {
-        setUsers(JSON.parse(allStoredUsers))
-      } else {
-        localStorage.setItem("allUsers", JSON.stringify(MOCK_USERS))
-      }
+      setUsers(JSON.parse(allStoredUsers ?? "[]"))
     }
   }, [router])
 
@@ -120,7 +85,7 @@ export default function AdminPanel() {
         const storedScores = localStorage.getItem(`scores_${uid}`)
         if (storedScores) {
           const scoresData = JSON.parse(storedScores) as AppScoreData[]
-          scoresData.sort((a, b) => b.weekId.localeCompare(a.weekId))
+          scoresData.sort((a, b) => b.weekNumber - a.weekNumber)
           setScores(scoresData)
         } else {
           setScores([])
@@ -150,7 +115,7 @@ export default function AdminPanel() {
     return false
   }
 
-  const handleDeleteScore = async (weekIdToDelete: string) => {
+  const handleDeleteScore = async (weekIdToDelete: number) => {
     if (!selectedUserUid || !currentUser) {
       setMessage("Please select a user and ensure you're logged in")
       return
@@ -171,7 +136,7 @@ export default function AdminPanel() {
 
       if (existingScores) {
         const scoresArray: AppScoreData[] = JSON.parse(existingScores)
-        const scoreToDelete = scoresArray.find((score) => score.weekId === weekIdToDelete)
+        const scoreToDelete = scoresArray.find((score) => score.weekNumber === weekIdToDelete)
 
         if (!scoreToDelete) {
           setMessage("Score entry not found")
@@ -179,16 +144,16 @@ export default function AdminPanel() {
           return
         }
 
-        const updatedScores = scoresArray.filter((score) => score.weekId !== weekIdToDelete)
+        const updatedScores = scoresArray.filter((score) => score.weekNumber !== weekIdToDelete)
         localStorage.setItem(storageKey, JSON.stringify(updatedScores))
 
         // Log the deletion for audit purposes
         const deletionLog = {
           id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          deletedBy: currentUser.uid,
+          deletedBy: currentUser.employeeId,
           deletedByName: currentUser.name,
           targetUser: selectedUserUid,
-          targetUserName: users.find((u) => u.uid === selectedUserUid)?.name || "Unknown",
+          targetUserName: users.find((u) => u.employeeId === selectedUserUid)?.name || "Unknown",
           weekId: weekIdToDelete,
           deletedScore: scoreToDelete,
           timestamp: new Date().toISOString(),
@@ -218,7 +183,7 @@ export default function AdminPanel() {
     if (!selectedUserUid || !weekId || typeof window === "undefined") return
 
     // Check if current user can manage the selected user
-    const selectedUser = users.find((u) => u.uid === selectedUserUid)
+    const selectedUser = users.find((u) => u.employeeId === selectedUserUid)
     if (selectedUser && !canManageUser(selectedUser)) {
       setMessage("You don't have permission to manage this user's scores")
       return
@@ -244,19 +209,23 @@ export default function AdminPanel() {
       const checkMark = hoursNum >= 20 && OC === 1
 
       const newScore: AppScoreData = {
-        weekId,
-        EC,
-        OC,
-        CC,
-        WCS: finalScore,
-        checkMark,
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Temp ID for localStorage
+        employeeId: selectedUserUid,
+        adminId: selectedUser && currentUser && canManageUser(selectedUser) ? currentUser.employeeId : "",
+        weekNumber: Number(weekId),
+        year: new Date().getFullYear(),
+        effortCredit: EC,
+        outcomeCredit: OC,
+        collabCredit: CC,
+        wcs: finalScore,
+        checkmarks: checkMark ? 1 : 0,
         createdAt: new Date().toISOString(),
       }
 
       const existingScores = localStorage.getItem(`scores_${selectedUserUid}`)
       const scoresArray: AppScoreData[] = existingScores ? JSON.parse(existingScores) : []
 
-      const existingIndex = scoresArray.findIndex((s) => s.weekId === weekId)
+      const existingIndex = scoresArray.findIndex((s) => s.weekNumber === Number(weekId))
       if (existingIndex >= 0) {
         scoresArray[existingIndex] = newScore
       } else {
@@ -293,7 +262,7 @@ export default function AdminPanel() {
   }, [])
 
   const handleViewUpdatesClick = (scoreWeekId: string) => {
-    const userToView = users.find((u) => u.uid === selectedUserUid)
+    const userToView = users.find((u) => u.employeeId === selectedUserUid)
     if (userToView) {
       setViewingUpdatesForUser(userToView)
       setViewingUpdatesForWeekId(scoreWeekId)
@@ -301,7 +270,7 @@ export default function AdminPanel() {
     }
   }
 
-  const selectedUserDetails = users.find((u) => u.uid === selectedUserUid)
+  const selectedUserDetails = users.find((u) => u.employeeId === selectedUserUid)
   const isOwner = currentUser?.role === "owner"
   const canDeleteScores = currentUser?.role === "owner"
 
@@ -379,16 +348,16 @@ export default function AdminPanel() {
               ) : (
                 managableUsers.map((member) => (
                   <div
-                    key={member.uid}
+                    key={member.employeeId}
                     className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedUserUid === member.uid
+                      selectedUserUid === member.employeeId
                         ? "bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700"
                         : "hover:bg-gray-100 dark:hover:bg-gray-700/50 border-gray-200 dark:border-gray-700"
                     }`}
-                    onClick={() => setSelectedUserUid(member.uid)}
+                    onClick={() => setSelectedUserUid(member.employeeId)}
                   >
                     <div className="font-medium text-sm sm:text-base text-gray-900 dark:text-white">{member.name}</div>
-                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 truncate">{member.email}</div>
+                    <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 truncate">{member.loginEmail}</div>
                     <Badge
                       variant={member.role === "owner" ? "default" : member.role === "admin" ? "secondary" : "outline"}
                       className="mt-1 text-xs"
@@ -573,29 +542,29 @@ export default function AdminPanel() {
                   </TableHeader>
                   <TableBody>
                     {scores.map((score) => (
-                      <TableRow key={score.weekId} className="dark:border-gray-700">
+                      <TableRow key={score.weekNumber} className="dark:border-gray-700">
                         <TableCell className="font-medium text-xs sm:text-sm text-gray-900 dark:text-white">
-                          {score.weekId}
+                          {score.weekNumber}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm text-gray-900 dark:text-white">
-                          {score.EC.toFixed(2)}
+                          {score.effortCredit.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm text-gray-900 dark:text-white">
-                          {score.OC.toFixed(2)}
+                          {score.outcomeCredit.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm text-gray-900 dark:text-white">
-                          {score.CC.toFixed(2)}
+                          {score.collabCredit.toFixed(2)}
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={score.WCS >= 0.8 ? "default" : score.WCS >= 0.6 ? "secondary" : "destructive"}
+                            variant={score.wcs >= 0.8 ? "default" : score.wcs >= 0.6 ? "secondary" : "destructive"}
                             className="text-xs"
                           >
-                            {score.WCS.toFixed(2)}
+                            {score.wcs.toFixed(2)}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {score.checkMark && (
+                          {score.checkmarks && (
                             <Badge
                               variant="outline"
                               className="text-xs text-green-600 border-green-600 dark:text-green-400 dark:border-green-400"
@@ -612,7 +581,7 @@ export default function AdminPanel() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleViewUpdatesClick(score.weekId)}
+                              onClick={() => handleViewUpdatesClick(score.weekNumber.toString())}
                               className="text-xs"
                             >
                               <Eye className="h-3 w-3 mr-1" />
@@ -637,15 +606,15 @@ export default function AdminPanel() {
                                       Delete Score Entry
                                     </AlertDialogTitle>
                                     <AlertDialogDescription className="text-gray-600 dark:text-gray-300">
-                                      Are you sure you want to delete the score entry for week {score.weekId}? This
+                                      Are you sure you want to delete the score entry for week {score.weekNumber}? This
                                       action cannot be undone.
                                       <br />
                                       <br />
                                       <strong>User:</strong> {selectedUserDetails?.name}
                                       <br />
-                                      <strong>Week:</strong> {score.weekId}
+                                      <strong>Week:</strong> {score.weekNumber}
                                       <br />
-                                      <strong>Score:</strong> {score.WCS.toFixed(2)}
+                                      <strong>Score:</strong> {score.wcs.toFixed(2)}
                                     </AlertDialogDescription>
                                   </AlertDialogHeader>
                                   <AlertDialogFooter>
@@ -653,7 +622,7 @@ export default function AdminPanel() {
                                       Cancel
                                     </AlertDialogCancel>
                                     <AlertDialogAction
-                                      onClick={() => handleDeleteScore(score.weekId)}
+                                      onClick={() => handleDeleteScore(score.weekNumber)}
                                       className="bg-red-600 hover:bg-red-700 text-white"
                                     >
                                       Delete Score

@@ -11,46 +11,60 @@ import { Eye, EyeOff } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
-import type { User } from "@/types"
-
-// const DEMO_USERS: User[] = [
-//   {
-//     uid: "owner_settlyfe_com",
-//     email: "bakeryang1128@gmail.com",
-//     name: "Baker Yang",
-//     role: "owner",
-//     teamId: "settlyfe",
-//     createdAt: new Date().toISOString(),
-//     theme: "light",
-//   },
-//   {
-//     uid: "admin_settlyfe_com",
-//     email: "admin@settlyfe.com",
-//     name: "Admin User",
-//     role: "admin",
-//     teamId: "settlyfe",
-//     createdAt: new Date().toISOString(),
-//     theme: "light",
-//   },
-//   {
-//     uid: "user01_settlyfe_com",
-//     email: "user01@settlyfe.com",
-//     name: "John Doe",
-//     role: "member",
-//     teamId: "settlyfe",
-//     createdAt: new Date().toISOString(),
-//     theme: "light",
-//   },
-// ]
 
 export default function LoginPage() {
-  const { signIn } = useAuth()
+  const { signIn, account, employee } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
+
+  useEffect(() => {
+    // Check for error parameters in URL
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlError = urlParams.get('error')
+    const urlMessage = urlParams.get('message')
+    
+    if (urlError && urlMessage) {
+      setError(decodeURIComponent(urlMessage))
+    } else if (urlError) {
+      switch (urlError) {
+        case 'confirmation_failed':
+          setError('Email confirmation failed. Please try again.')
+          break
+        case 'server_error':
+          setError('Server error during confirmation. Please contact support.')
+          break
+        case 'invalid_link':
+          setError('Invalid confirmation link. Please sign up again.')
+          break
+        default:
+          setError('Authentication error occurred.')
+      }
+    }
+  }, [])
+
+  // Redirect if user is already authenticated
+  useEffect(() => {
+    if (account && employee) {
+      console.log('User is authenticated, redirecting from login page...')
+      // Check if user has placeholder names
+      const hasPlaceholderNames = (
+        (employee.first_name === 'First' && employee.last_name === 'Last') ||
+        (employee.first_name === 'Unknown' && employee.last_name === 'User') ||
+        (!employee.first_name || !employee.last_name) ||
+        (employee.first_name.trim() === '' || employee.last_name.trim() === '')
+      )
+      
+      if (hasPlaceholderNames) {
+        router.push('/complete-profile')
+      } else {
+        router.push('/dashboard')
+      }
+    }
+  }, [account, employee, router])
 
   useEffect(() => {
     // Force light theme on login page
@@ -85,15 +99,22 @@ export default function LoginPage() {
       if (result.error) {
         console.error('Sign in error:', result.error)
         setError(result.error)
+        setLoading(false)
         return
       }
 
-      console.log('Sign in successful, redirecting to dashboard...')
-      router.push("/dashboard")
+      console.log('Sign in successful, auth context will handle redirect...')
+      // Don't manually redirect - let the auth context handle it
+      // The auth context will redirect to either /complete-profile or /dashboard
+      
+      // Reset loading after a short delay to allow for auth context to take over
+      setTimeout(() => {
+        setLoading(false)
+      }, 1000)
+      
     } catch (error) {
       console.error("Login error:", error)
       setError("Login failed: " + (error instanceof Error ? error.message : 'Unknown error'))
-    } finally {
       setLoading(false)
     }
   }
@@ -172,24 +193,6 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        {/* Demo Credentials */}
-        <div className="mt-6 p-4 bg-gray-50 border border-gray-200">
-          <h3 className="text-sm font-medium mb-3 text-gray-800">Demo Credentials:</h3>
-          <div className="space-y-1 text-sm">
-            <div className="text-black">
-              <span className="font-medium text-purple-600">Owner:</span> bakeryang1128@gmail.com / Yang123321
-            </div>
-            <div className="text-black">
-              <span className="font-medium text-blue-600">Admin:</span> admin@settlyfe.com / any password
-            </div>
-            <div className="text-black">
-              <span className="font-medium text-green-600">Member:</span> user01@settlyfe.com / any password
-            </div>
-            <div className="text-black">
-              <span className="font-medium text-green-600">Member:</span> (No longer recommended for usage)
-            </div>
-          </div>
-        </div>
 
       </div>
     </div>

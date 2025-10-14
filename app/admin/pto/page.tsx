@@ -61,7 +61,7 @@ export default function AdminPTOPage() {
   const router = useRouter()
 
   const [selectedRequests, setSelectedRequests] = useState<string[]>([])
-  const [bulkAction, setBulkAction] = useState<"approve" | "reject" | null>(null)
+  const [bulkAction, setBulkAction] = useState<"approved" | "rejected" | null>(null)
   const [bulkComments, setBulkComments] = useState("")
   const [showBulkDialog, setShowBulkDialog] = useState(false)
 
@@ -136,7 +136,7 @@ export default function AdminPTOPage() {
     }
   }
 
-  const handleBulkAction = (action: "approve" | "reject") => {
+  const handleBulkAction = (action: "approved" | "rejected") => {
     if (selectedRequests.length === 0) return
     setBulkAction(action)
     setShowBulkDialog(true)
@@ -280,11 +280,11 @@ export default function AdminPTOPage() {
 
                 {selectedRequests.length > 0 && (
                   <>
-                    <Button onClick={() => handleBulkAction("approve")} className="bg-green-600 hover:bg-green-700">
+                    <Button onClick={() => handleBulkAction("approved")} className="bg-green-600 hover:bg-green-700">
                       <CheckCircle className="h-4 w-4 mr-2" />
                       Bulk Approve ({selectedRequests.length})
                     </Button>
-                    <Button variant="destructive" onClick={() => handleBulkAction("reject")}>
+                    <Button variant="destructive" onClick={() => handleBulkAction("rejected")}>
                       <XCircle className="h-4 w-4 mr-2" />
                       Bulk Reject ({selectedRequests.length})
                     </Button>
@@ -573,7 +573,7 @@ export default function AdminPTOPage() {
         <DialogContent className="dark:bg-gray-800 dark:border-gray-700">
           <DialogHeader>
             <DialogTitle className="text-gray-900 dark:text-white">
-              Confirm Bulk {bulkAction === "approve" ? "Approval" : "Rejection"}
+              Confirm Bulk {bulkAction === "approved" ? "Approval" : "Rejection"}
             </DialogTitle>
             <DialogDescription className="text-gray-600 dark:text-gray-300">
               You are about to {bulkAction} {selectedRequests.length} PTO request(s).
@@ -591,7 +591,7 @@ export default function AdminPTOPage() {
             </div>
             <div className="flex gap-2">
               <Button onClick={confirmBulkAction} className="flex-1">
-                Confirm {bulkAction === "approve" ? "Approval" : "Rejection"}
+                Confirm {bulkAction === "approved" ? "Approval" : "Rejection"}
               </Button>
               <Button variant="outline" onClick={() => setShowBulkDialog(false)} className="flex-1">
                 Cancel

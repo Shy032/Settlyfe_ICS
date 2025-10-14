@@ -23,13 +23,13 @@ import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
 import { useTranslation } from "@/lib/i18n"
 import { SupabaseService } from "@/lib/supabase"
-import type { ClockinSession, User, Team } from "@/types"
+import type { ClockinSession, Employee, Team } from "@/types"
 
 export default function CalendarPage() {
-  const { user, isAdmin, isOwner } = useAuth()
-  const { t } = useTranslation(user?.preferredLanguage as any)
+  const { account, employee, isAdmin, isOwner } = useAuth()
+  const { t } = useTranslation(employee?.preferred_language as any)
   const [clockinSessions, setClockinSessions] = useState<ClockinSession[]>([])
-  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [allUsers, setAllUsers] = useState<Employee[]>([])
   const [deletionRequests, setDeletionRequests] = useState<any[]>([]) // Simplified for now
 
   // Advanced owner dashboard state
@@ -72,12 +72,12 @@ export default function CalendarPage() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   const loadAllData = useCallback(async () => {
-    if (typeof window === "undefined" || !user) return
+    if (typeof window === "undefined" || !account || !employee) return
     setLoading(true)
 
     try {
       // Load clockin sessions from database
-      const employeeId = isAdmin() || isOwner() ? undefined : user.employeeId
+      const employeeId = isAdmin() || isOwner() ? undefined : employee.id
       const { data: sessions, error: sessionsError } = await SupabaseService.getClockinSessions(employeeId)
       
       if (sessionsError) {
@@ -86,14 +86,14 @@ export default function CalendarPage() {
         // Transform database data to match our interface
         const transformedSessions: ClockinSession[] = sessions?.map((session: any) => ({
           id: session.id,
-          employeeId: session.employee_id,
+          employee_id: session.employee_id,
           date: session.date,
-          startTime: session.start_time,
-          endTime: session.end_time,
+          start_time: session.start_time,
+          end_time: session.end_time,
           duration: session.duration,
           hours: session.hours,
           description: session.description,
-          createdAt: session.created_at,
+          created_at: session.created_at,
         })) || []
 
         // Sort by date (newest first)
@@ -124,15 +124,15 @@ export default function CalendarPage() {
     } finally {
       setLoading(false)
     }
-  }, [user, isAdmin, isOwner])
+  }, [account, employee, isAdmin, isOwner])
 
   useEffect(() => {
-    if (!user) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
     loadAllData()
-  }, [user, router, loadAllData, refreshKey])
+  }, [account, employee, router, loadAllData, refreshKey])
 
   // Refresh data from database
   const refreshData = () => {
@@ -141,7 +141,7 @@ export default function CalendarPage() {
 
   const handleSubmitHours = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!hours || !selectedDate || !user) {
+    if (!hours || !selectedDate || !account || !employee) {
       setMessage("Please enter hours and select a date")
       return
     }
@@ -185,7 +185,7 @@ export default function CalendarPage() {
           // Create new session
           console.log('Creating new clockin session')
           const { data, error } = await SupabaseService.createClockinSession({
-            employee_id: user.employeeId,
+            employee_id: employee.id,
             date: selectedDate,
             start_time: '09:00:00', // Default times for manual entries
             end_time: '17:00:00',
@@ -230,10 +230,10 @@ export default function CalendarPage() {
   }
 
   const handleDeleteClick = (session: ClockinSession) => {
-    if (!user || (!isAdmin() && !isOwner())) return
+    if (!account || !employee || (!isAdmin() && !isOwner())) return
 
-    // If it's the current user's own session, they can delete it directly.
-    if (session.employeeId === user.employeeId) {
+    // If it's the current employee's own session, they can delete it directly.
+    if (session.employee_id === employee.id) {
       setEntryToDelete(session)
       setShowDeletionRequestDialog(true)
     } else {
@@ -249,14 +249,14 @@ export default function CalendarPage() {
   }
 
   const handleSubmitDeletionRequest = async () => {
-    if (!entryToDelete || !user) return
+    if (!entryToDelete || !account || !employee) return
 
     try {
       // Direct deletion for self
-      if (entryToDelete.employeeId === user.employeeId) {
+      if (entryToDelete.employee_id === employee.id) {
         console.log('Deleting clockin session:', entryToDelete.id)
         const { error } = await SupabaseService.updateClockinSession(entryToDelete.id, { 
-          deleted: true 
+          description: `[DELETED] ${entryToDelete.description || "Time entry"}` 
         })
         
         if (error) {
@@ -272,8 +272,8 @@ export default function CalendarPage() {
         const newRequest = {
           id: `delReq_${Date.now()}`,
           sessionId: entryToDelete.id,
-          employeeId: entryToDelete.employeeId,
-          requestedByUid: user.accountId,
+          employee_id: entryToDelete.employee_id,
+          requestedByUid: account.id,
           requestReason: deletionReason.trim() || "No reason provided",
           status: "pending",
           requestedAt: new Date().toISOString(),
@@ -298,7 +298,7 @@ export default function CalendarPage() {
   }
 
   const handleSubmitAdminComment = async () => {
-    if (!entryToCommentOn || !user) return
+    if (!entryToCommentOn || !account || !employee) return
 
     try {
       console.log('Updating clockin session comment:', entryToCommentOn.id)
@@ -325,7 +325,7 @@ export default function CalendarPage() {
   }
 
   const handleReviewDeletionRequest = (request: any, decision: "approved" | "rejected") => {
-    if (!isOwner() || !user) return
+    if (!isOwner() || !account || !employee) return
 
     const updatedRequests = deletionRequests.map((r: any) =>
       r.id === request.id
@@ -334,14 +334,14 @@ export default function CalendarPage() {
             status: decision,
             ownerComment: ownerReviewComment.trim() || undefined,
             reviewedAt: new Date().toISOString(),
-            reviewedByUid: user.accountId,
+            reviewedByUid: account.id,
           }
         : r,
     )
 
     if (decision === "approved") {
       // Delete the clockin session from database
-      SupabaseService.updateClockinSession(request.sessionId, { deleted: true }).catch(console.error)
+      SupabaseService.updateClockinSession(request.sessionId, { description: `[DELETED] Time entry` }).catch(console.error)
       // Refresh data
       refreshData()
     }
@@ -352,16 +352,19 @@ export default function CalendarPage() {
     setMessage(`Deletion request has been ${decision}.`)
   }
 
-  const getUserName = (employeeId: string) => allUsers.find((u) => u.employeeId === employeeId)?.name || "Unknown User"
+  const getUserName = (employeeId: string) => {
+    const user = allUsers.find((u) => u.id === employeeId)
+    return user ? `${user.first_name} ${user.last_name}` : "Unknown User"
+  }
 
   const getMyHoursForDate = (date: string) => {
-    if (!user) return []
-    return clockinSessions.filter((session) => session.date === date && session.employeeId === user.employeeId)
+    if (!employee) return []
+    return clockinSessions.filter((session) => session.date === date && session.employee_id === employee.id)
   }
 
   const getTeamHeatmapIntensity = (date: string) => {
     const daySessions = clockinSessions.filter((session) => session.date === date)
-    const uniqueUsers = new Set(daySessions.map((session) => session.employeeId)).size
+    const uniqueUsers = new Set(daySessions.map((session) => session.employee_id)).size
     const maxUsers = Math.max(1, allUsers.length)
     return (uniqueUsers / maxUsers) * 100
   }
@@ -371,14 +374,14 @@ export default function CalendarPage() {
       teamId === "all"
         ? clockinSessions
         : clockinSessions.filter((session) => {
-            const sessionUser = allUsers.find((u) => u.employeeId === session.employeeId)
-            return sessionUser?.teamId === teamId
+            const sessionUser = allUsers.find((u) => u.id === session.employee_id)
+            return sessionUser?.team_id === teamId
           })
 
-    const teamUsers = teamId === "all" ? allUsers : allUsers.filter((u) => u.teamId === teamId)
+    const teamUsers = teamId === "all" ? allUsers : allUsers.filter((u) => u.team_id === teamId)
 
-    const totalHours = teamSessions.reduce((sum, session) => sum + session.hours, 0)
-    const activeMembers = new Set(teamSessions.map((session) => session.employeeId)).size
+    const totalHours = teamSessions.reduce((sum, session) => sum + (session.hours || 0), 0)
+    const activeMembers = new Set(teamSessions.map((session) => session.employee_id)).size
     const avgDailyHours = teamSessions.length > 0 ? totalHours / teamSessions.length : 0
 
     // Calculate peak day
@@ -386,7 +389,7 @@ export default function CalendarPage() {
     teamSessions.forEach((session) => {
       const dayOfWeek = new Date(session.date).getDay()
       const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][dayOfWeek]
-      hoursByDay[dayName] = (hoursByDay[dayName] || 0) + session.hours
+      hoursByDay[dayName] = (hoursByDay[dayName] || 0) + (session.hours || 0)
     })
     const peakDay = Object.entries(hoursByDay).sort(([, a], [, b]) => b - a)[0]?.[0] || "N/A"
 
@@ -416,9 +419,9 @@ export default function CalendarPage() {
       const isToday = dateStr === new Date().toISOString().split("T")[0]
 
       // Get entries for this date
-      const myEntries = user ? clockinSessions.filter((session) => session.date === dateStr && session.employeeId === user.employeeId) : []
+      const myEntries = employee ? clockinSessions.filter((session) => session.date === dateStr && session.employee_id === employee.id) : []
       const allDayEntries = clockinSessions.filter((session) => session.date === dateStr)
-      const myTotalHours = myEntries.reduce((sum, session) => sum + session.hours, 0)
+      const myTotalHours = myEntries.reduce((sum, session) => sum + (session.hours || 0), 0)
       const heatmapIntensity = getTeamHeatmapIntensity(dateStr)
 
       days.push(
@@ -461,11 +464,11 @@ export default function CalendarPage() {
                     e.stopPropagation()
                     setEditingEntry(entry)
                     setSelectedDate(entry.date)
-                    setHours(entry.hours.toString())
+                    setHours((entry.hours || 0).toString())
                     setDescription(entry.description || "")
                   }}
                 >
-                  {t("myHours")}: {entry.hours}h
+                  {t("myHours")}: {entry.hours || 0}h
                   {entry.description && <div className="text-xs opacity-75 truncate">{entry.description}</div>}
                 </div>
               ))}
@@ -486,7 +489,7 @@ export default function CalendarPage() {
     return days
   }
 
-  if (loading && !user) {
+  if (loading && (!account || !employee)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -762,16 +765,16 @@ export default function CalendarPage() {
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {pendingDeletionRequests.map((req) => {
-                      const entryUser = allUsers.find((u) => u.employeeId === req.employeeId)
-                      const requestor = allUsers.find((u) => u.accountId === req.requestedByUid)
+                      const entryUser = allUsers.find((u) => u.id === req.employee_id)
+                      const requestor = allUsers.find((u) => u.id === req.requestedByUid)
                       const originalEntry = clockinSessions.find((he) => he.id === req.sessionId)
                       return (
                         <div key={req.id} className="p-3 border border-border rounded-md bg-muted">
                           <p>
-                            <strong>{entryUser?.name || "Unknown User"}</strong>'s entry of{" "}
+                            <strong>{entryUser ? `${entryUser.first_name} ${entryUser.last_name}` : "Unknown User"}</strong>'s entry of{" "}
                             <strong>{originalEntry?.hours || "N/A"}h</strong> on {originalEntry?.date || "N/A"}
                           </p>
-                          <p className="text-sm text-muted-foreground">Requested by: {requestor?.name || "Unknown"}</p>
+                          <p className="text-sm text-muted-foreground">Requested by: {requestor ? `${requestor.first_name} ${requestor.last_name}` : "Unknown"}</p>
                           {req.requestReason && (
                             <p className="text-sm mt-1 italic text-muted-foreground">Reason: {req.requestReason}</p>
                           )}
@@ -813,26 +816,26 @@ export default function CalendarPage() {
                 <CardContent className="space-y-4">
                   {(() => {
                     const filteredUsers =
-                      selectedTeamId === "all" ? allUsers : allUsers.filter((u) => u.teamId === selectedTeamId)
+                      selectedTeamId === "all" ? allUsers : allUsers.filter((u) => u.team_id === selectedTeamId)
 
                     return filteredUsers.map((member) => {
                       const memberEntries = clockinSessions
-                        .filter((entry) => entry.employeeId === member.employeeId)
+                        .filter((entry) => entry.employee_id === member.id)
                         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                      const totalHours = memberEntries.reduce((sum, entry) => sum + entry.hours, 0)
+                      const totalHours = memberEntries.reduce((sum, entry) => sum + (entry.hours || 0), 0)
 
                       return (
-                        <div key={member.employeeId} className="border border-border rounded-lg p-4">
+                        <div key={member.id} className="border border-border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
                               <div>
                                 <div className="font-medium flex items-center gap-2">
-                                  {member.name}
+                                  {member.first_name} {member.last_name}
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     onClick={() => {
-                                      setSelectedUserForEmoji(member.employeeId)
+                                      setSelectedUserForEmoji(member.id)
                                       setShowEmojiPicker(true)
                                     }}
                                     className="h-6 w-6 p-0"
@@ -840,10 +843,10 @@ export default function CalendarPage() {
                                     😊
                                   </Button>
                                 </div>
-                                <div className="text-sm text-muted-foreground">{member.loginEmail}</div>
-                                {member.teamId && (
+                                <div className="text-sm text-muted-foreground">{member.personal_email || member.github_email || ""}</div>
+                                {member.team_id && (
                                   <div className="text-xs text-blue-600 dark:text-blue-400">
-                                    Team: {teams.find((t) => t.id === member.teamId)?.name || "Unknown"}
+                                    Team: {teams.find((t) => t.id === member.team_id)?.name || "Unknown"}
                                   </div>
                                 )}
                               </div>
@@ -916,15 +919,15 @@ export default function CalendarPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-red-500" />
-              {entryToDelete?.employeeId === user?.employeeId ? "Confirm Deletion" : "Request Time Entry Deletion"}
+              {entryToDelete?.employee_id === employee?.id ? "Confirm Deletion" : "Request Time Entry Deletion"}
             </DialogTitle>
             <DialogDescription>
-              {entryToDelete?.employeeId === user?.employeeId
+              {entryToDelete?.employee_id === employee?.id
                 ? `Are you sure you want to delete your time entry of ${entryToDelete?.hours}h on ${entryToDelete?.date}? This action cannot be undone.`
-                : `You are requesting to delete ${getUserName(entryToDelete?.employeeId || "")}'s time entry of ${entryToDelete?.hours}h on ${entryToDelete?.date}. Please provide a reason for the Owner.`}
+                : `You are requesting to delete ${getUserName(entryToDelete?.employee_id || "")}'s time entry of ${entryToDelete?.hours}h on ${entryToDelete?.date}. Please provide a reason for the Owner.`}
             </DialogDescription>
           </DialogHeader>
-          {entryToDelete?.employeeId !== user?.employeeId && (
+          {entryToDelete?.employee_id !== employee?.id && (
             <div className="space-y-2 my-4">
               <Label htmlFor="deletionReason">Reason for Deletion (Required)</Label>
               <Textarea
@@ -942,9 +945,9 @@ export default function CalendarPage() {
             <Button
               variant="destructive"
               onClick={handleSubmitDeletionRequest}
-              disabled={entryToDelete?.employeeId !== user?.employeeId && !deletionReason.trim()}
+              disabled={entryToDelete?.employee_id !== employee?.id && !deletionReason.trim()}
             >
-              {entryToDelete?.employeeId === user?.employeeId ? "Delete Entry" : "Submit Request"}
+              {entryToDelete?.employee_id === employee?.id ? "Delete Entry" : "Submit Request"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -959,7 +962,7 @@ export default function CalendarPage() {
               Add/Edit Comment for Time Entry
             </DialogTitle>
             <DialogDescription>
-              Entry by {getUserName(entryToCommentOn?.employeeId || "")} for {entryToCommentOn?.hours}h on{" "}
+              Entry by {getUserName(entryToCommentOn?.employee_id || "")} for {entryToCommentOn?.hours}h on{" "}
               {entryToCommentOn?.date}.
             </DialogDescription>
           </DialogHeader>
@@ -992,7 +995,7 @@ export default function CalendarPage() {
               <DialogDescription>
                 Reviewing request to delete{" "}
                 <strong>{clockinSessions.find((he) => he.id === requestToReview.sessionId)?.hours || "N/A"}h</strong> for{" "}
-                <strong>{getUserName(requestToReview.employeeId)}</strong> on{" "}
+                <strong>{getUserName(requestToReview.employee_id)}</strong> on{" "}
                 {clockinSessions.find((he) => he.id === requestToReview.sessionId)?.date || "N/A"}.
                 <br />
                 Requested by: {getUserName(requestToReview.requestedByUid)}.

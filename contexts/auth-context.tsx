@@ -2,24 +2,26 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { supabase, SupabaseService } from "@/lib/supabase"
-import type { User } from "@/types"
+import type { Account, Employee } from "@/types"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface AuthContextType {
-  user: User | null
+  account: Account | null
+  employee: Employee | null
   loading: boolean
   signOut: () => Promise<void>
   isAdmin: () => boolean
   isMember: () => boolean
   isOwner: () => boolean
   signIn: (email: string, password: string) => Promise<{ error?: string }>
-  signUp: (email: string, password: string, userData: Partial<User>) => Promise<{ error?: string }>
-  updateUser: (userData: Partial<User>) => Promise<void>
-  userClaims: { role: string } | null
+  signUp: (email: string, password: string) => Promise<{ error?: string }>
+  updateProfile: (data: Partial<Employee> & { login_email?: string }) => Promise<void>
+  ensureValidSession: () => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: null,
+  account: null,
+  employee: null,
   loading: true,
   signOut: async () => {},
   isAdmin: () => false,
@@ -27,19 +29,20 @@ const AuthContext = createContext<AuthContextType>({
   isOwner: () => false,
   signIn: async () => ({ error: 'Not implemented' }),
   signUp: async () => ({ error: 'Not implemented' }),
-  updateUser: async () => {},
-  userClaims: null,
+  updateProfile: async () => {},
+  ensureValidSession: async () => false,
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [account, setAccount] = useState<Account | null>(null)
+  const [employee, setEmployee] = useState<Employee | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        loadUserProfile(session.user)
+        loadProfile(session.user)
       }
       setLoading(false)
     })
@@ -48,62 +51,164 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        // Only load profile if we don't already have a user loaded or if the user changed
-        if (!user || user.accountId !== session.user.id) {
-          await loadUserProfile(session.user)
-      }
-    } else {
-        setUser(null)
-    }
-    setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const loadUserProfile = async (supabaseUser: SupabaseUser) => {
-    try {
-      console.log('Loading user profile for account ID:', supabaseUser.id)
+      console.log('Auth state change:', event, session?.user?.id)
       
-      const { data: userData, error } = await SupabaseService.getFullUserByAccountId(supabaseUser.id)
-      
-      // Check for various "not found" error conditions
-      if (error && (
-        error.message?.includes('not found') || 
-        error.message?.includes('No rows') ||
-        (error as any).code === 'PGRST116' ||
-        !userData
-      )) {
-        console.log('User profile not found during sign-in. This should not happen after signup.')
-        console.log('Error details:', error)
-        
-        // Don't try to create profile during sign-in - it should already exist
-        // If we're here, it's likely an RLS policy issue or the profile doesn't exist
-        console.log('Signing out user due to profile access failure...')
-        await signOut()
-          return
+      if (session?.user && session.user.email_confirmed_at) {
+        // Handle email confirmation - create profile if it doesn't exist
+        if (event === 'SIGNED_IN') {
+          await handleEmailConfirmation(session.user)
         }
         
-      if (error) {
-        console.error('Error in loadUserProfile:', error)
-        console.log('Signing out user due to unhandled error...')
+        // Handle token refresh
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('Token refreshed successfully')
+        }
+        
+        // Only load profile if we don't already have an account loaded or if the account changed
+        if (!account || account.id !== session.user.id) {
+          await loadProfile(session.user)
+        }
+      } else {
+        // No valid session or unconfirmed email
+        setAccount(null)
+        setEmployee(null)
+      }
+      setLoading(false)
+    })
+
+    // Set up proactive token refresh
+    const tokenRefreshInterval = setInterval(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.access_token) {
+          const now = Math.floor(Date.now() / 1000)
+          const expiresAt = session.expires_at || 0
+          const timeUntilExpiry = expiresAt - now
+          
+          // Refresh token if it expires within 5 minutes (300 seconds)
+          if (timeUntilExpiry > 0 && timeUntilExpiry < 300) {
+            console.log('Proactively refreshing token (expires in', timeUntilExpiry, 'seconds)')
+            const { error } = await supabase.auth.refreshSession()
+            if (error) {
+              console.error('Token refresh failed:', error)
+            } else {
+              console.log('Token refreshed proactively')
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error in token refresh check:', error)
+      }
+    }, 60000) // Check every minute
+
+    return () => {
+      subscription.unsubscribe()
+      clearInterval(tokenRefreshInterval)
+    }
+  }, [])
+
+  const handleEmailConfirmation = async (supabaseUser: SupabaseUser) => {
+    try {
+      console.log('Handling email confirmation for user:', supabaseUser.id)
+      
+      // Check if profile already exists
+      const { data: existingAccount } = await SupabaseService.getAccountById(supabaseUser.id)
+      
+      if (existingAccount) {
+        console.log('Profile already exists')
+        return
+      }
+
+      // Get stored signup data
+      if (typeof window !== 'undefined') {
+        const storedData = localStorage.getItem('pending_signup_data')
+        if (storedData) {
+          const signupData = JSON.parse(storedData)
+          console.log('Creating profile with stored data:', signupData)
+          
+          // Create the employee profile after email confirmation with placeholder data
+          const { data: profileData, error: profileError } = await SupabaseService.createEmployeeProfile({
+            account_id: supabaseUser.id,
+            email: signupData.email,
+            first_name: 'First', // Placeholder - user will update after login
+            last_name: 'Last',   // Placeholder - user will update after login
+            access_level: 'member' // Default access level - manager will update
+          })
+
+          if (profileError || !profileData) {
+            console.error('Error creating profile after email confirmation:', profileError)
+            return
+          }
+
+          console.log('Profile created successfully after email confirmation')
+          
+          // Clear stored data
+          localStorage.removeItem('pending_signup_data')
+          
+          setAccount(profileData.account)
+          setEmployee(profileData.employee)
+          applyTheme('light')
+          
+          // Redirect to profile completion since we created with placeholder names
+          if (typeof window !== 'undefined') {
+            window.location.href = '/complete-profile'
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleEmailConfirmation:', error)
+    }
+  }
+
+  const loadProfile = async (supabaseUser: SupabaseUser) => {
+    try {
+      console.log('Loading profile for account ID:', supabaseUser.id)
+      
+      // First get the account data
+      const { data: accountData, error: accountError } = await SupabaseService.getAccountById(supabaseUser.id)
+      
+      if (accountError || !accountData) {
+        console.error('Error loading account:', accountError)
         await signOut()
         return
-    }
+      }
+      console.log('Account data loaded:', accountData)
 
-      // User profile exists
-      if (userData) {
-        setUser(userData)
-        applyTheme(userData.theme || 'light')
-      } else {
-        console.log('No user data returned, signing out...')
+      // Then get the associated employee data
+      const { data: employeeData, error: employeeError } = await SupabaseService.getEmployeeById(accountData.employee_id!)
+      
+      if (employeeError || !employeeData) {
+        console.error('Error loading employee:', employeeError)
         await signOut()
+        return
+      }
+      console.log('Employee data loaded:', employeeData)
+
+      setAccount(accountData)
+      setEmployee(employeeData)
+      applyTheme(employeeData.theme || 'light')
+      
+      // Check if user needs to complete their profile (has placeholder names)
+      const hasPlaceholderNames = (
+        (employeeData.first_name === 'First' && employeeData.last_name === 'Last') ||
+        (employeeData.first_name === 'Unknown' && employeeData.last_name === 'User') ||
+        (!employeeData.first_name || !employeeData.last_name) ||
+        (employeeData.first_name.trim() === '' || employeeData.last_name.trim() === '')
+      )
+      
+      console.log('Has placeholder names:', hasPlaceholderNames, 'Current path:', window.location.pathname)
+      
+      if (typeof window !== 'undefined' && 
+          hasPlaceholderNames && 
+          !window.location.pathname.includes('/complete-profile') &&
+          !window.location.pathname.includes('/login') &&
+          !window.location.pathname.includes('/signup')) {
+        console.log('Redirecting to complete profile...')
+        window.location.href = '/complete-profile'
       }
       
     } catch (error) {
-      console.error('Error in loadUserProfile:', error)
-      console.log('Signing out user due to exception...')
+      console.error('Error in loadProfile:', error)
       await signOut()
     }
   }
@@ -120,6 +225,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const ensureValidSession = async (): Promise<boolean> => {
+    try {
+      console.log('Checking session validity...')
+      
+      // First check if we have a current session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      
+      if (sessionError) {
+        console.error('Session check error:', sessionError)
+        return false
+      }
+      
+      if (!session) {
+        console.log('No active session found')
+        return false
+      }
+      
+      // Check if token is expired or about to expire (within 5 minutes)
+      const now = Math.floor(Date.now() / 1000)
+      const expiresAt = session.expires_at || 0
+      const timeUntilExpiry = expiresAt - now
+      
+      if (timeUntilExpiry <= 300) { // 5 minutes buffer
+        console.log('Token expires soon, refreshing...', timeUntilExpiry, 'seconds remaining')
+        
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+        
+        if (refreshError) {
+          console.error('Token refresh failed:', refreshError)
+          return false
+        }
+        
+        if (!refreshData.session) {
+          console.error('No session after refresh')
+          return false
+        }
+        
+        console.log('Token refreshed successfully')
+      }
+      
+      console.log('Session is valid')
+      return true
+      
+    } catch (error) {
+      console.error('Error in ensureValidSession:', error)
+      return false
+    }
+  }
+
   const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
     try {
       console.log('Attempting signin for:', email)
@@ -132,8 +286,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data.user) {
-        console.log('Signin successful, loading user profile...')
-        await loadUserProfile(data.user)
+        console.log('Signin successful, loading profile...')
+        await loadProfile(data.user)
+        console.log('Profile loading completed')
       }
 
       return {}
@@ -143,189 +298,123 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Simplified signUp function - only email and password required
   const signUp = async (
     email: string, 
-    password: string, 
-    userData: Partial<User>
+    password: string
   ): Promise<{ error?: string }> => {
     try {
       console.log('Starting signup process for:', email)
       
-      const { data, error } = await SupabaseService.signUp(email, password, userData)
+      // Store minimal signup data for use after email confirmation
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('pending_signup_data', JSON.stringify({
+          email: email
+        }))
+      }
       
-      if (error) {
-        console.error('Supabase Auth signup error:', error)
-        return { error: error.message }
+      // Only create the auth user - profile will be created after email confirmation
+      const { data: authData, error: authError } = await SupabaseService.signUp(email, password)
+      
+      if (authError || !authData.user) {
+        console.error('Auth signup error:', authError)
+        // Clear stored data on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('pending_signup_data')
+        }
+        return { error: authError?.message || 'Failed to create user' }
       }
 
-      console.log('Supabase Auth signup successful, user created:', data.user?.id)
-
-      // Create user profile in database using the new schema
-      if (data.user) {
-        console.log('Creating user profile in database...')
-        
-        const { data: profileData, error: profileError } = await SupabaseService.createUserProfile({
-          accountId: data.user.id,
-          email: data.user.email!,
-          firstName: userData.name?.split(' ')[0] || '',
-          lastName: userData.name?.split(' ').slice(1).join(' ') || '',
-          role: userData.accessLevel || 'member',
-          teamId: userData.teamId,
-          departmentId: userData.departmentId,
-          theme: userData.theme || 'light',
-          preferredLanguage: userData.preferredLanguage || 'en'
-        })
-        
-        if (profileError) {
-          console.error('Database profile creation error:', profileError)
-          return { error: `Failed to create user profile: ${profileError.message}` }
-        }
-
-        console.log('User profile created successfully')
-        console.log('Function returned data:', JSON.stringify(profileData, null, 2))
-
-        // Check if the function returned an explicit error
-        if (profileData && (profileData as any).success === false) {
-          console.error('Database function returned error:', (profileData as any).error || (profileData as any).message)
-          return { error: `Failed to create user profile: ${(profileData as any).error || (profileData as any).message}` }
-        }
-
-        // Use the data returned by the function directly - check for account and employee data
-        if (profileData && (profileData as any).account && (profileData as any).employee) {
-          // Convert the returned data to User format
-          const account = (profileData as any).account
-          const employee = (profileData as any).employee
-          
-          const newUserData: User = {
-            accountId: account.id,
-            loginEmail: account.login_email,
-            accessLevel: account.access_level,
-            accountStatus: account.status,
-            employeeId: employee.id,
-            firstName: employee.first_name,
-            lastName: employee.last_name,
-            name: `${employee.first_name} ${employee.last_name}`,
-            title: employee.title,
-            role: employee.role,
-            teamId: employee.team_id,
-            departmentId: employee.department_id,
-            joinDate: employee.join_date,
-            status: employee.status,
-            overallAssessment: employee.overall_assessment,
-            phone: employee.phone,
-            personalEmail: employee.personal_email,
-            githubEmail: employee.github_email,
-            zoomEmail: employee.zoom_email,
-            note: employee.note,
-            profilePhoto: employee.profile_photo,
-            theme: employee.theme || 'light',
-            preferredLanguage: employee.preferred_language || 'en',
-            createdAt: account.created_at,
-            updatedAt: account.updated_at
-        }
-
-          setUser(newUserData)
-          applyTheme(newUserData.theme || 'light')
-        } else {
-          console.error('Invalid data returned from profile creation')
-          return { error: 'Invalid data returned from profile creation' }
-        }
-  }
-
+      console.log('Auth user created successfully. Check your email to confirm your account.')
       return {}
-    } catch (error) {
+    } catch (error: any) {
       console.error('Unexpected error in signUp:', error)
-      return { error: 'An unexpected error occurred during signup' }
+      // Clear stored data on error
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('pending_signup_data')
+      }
+      return { error: error.message || 'An unexpected error occurred' }
     }
   }
 
-  const updateUser = async (userData: Partial<User>) => {
-    if (!user) return
+  const updateProfile = async (data: Partial<Employee> & { login_email?: string }) => {
+    if (!account || !employee) return
 
     try {
-      console.log('Updating user:', user.accountId)
+      console.log('Updating profile:', account.id)
 
       // Prepare data for both account and employee updates
-      const accountUpdates: any = {}
-      const employeeUpdates: any = {}
+      const accountUpdates: Partial<Account> = {}
+      const employeeUpdates: Partial<Employee> = {}
 
-      // Map User fields to database fields
-      if (userData.loginEmail !== undefined) accountUpdates.login_email = userData.loginEmail
-      if (userData.accessLevel !== undefined) accountUpdates.access_level = userData.accessLevel
-      if (userData.accountStatus !== undefined) accountUpdates.status = userData.accountStatus
+      // Extract account updates
+      if (data.login_email !== undefined) accountUpdates.login_email = data.login_email
 
-      if (userData.firstName !== undefined) employeeUpdates.first_name = userData.firstName
-      if (userData.lastName !== undefined) employeeUpdates.last_name = userData.lastName
-      if (userData.title !== undefined) employeeUpdates.title = userData.title
-      if (userData.role !== undefined) employeeUpdates.role = userData.role
-      if (userData.teamId !== undefined) employeeUpdates.team_id = userData.teamId
-      if (userData.departmentId !== undefined) employeeUpdates.department_id = userData.departmentId
-      if (userData.phone !== undefined) employeeUpdates.phone = userData.phone
-      if (userData.personalEmail !== undefined) employeeUpdates.personal_email = userData.personalEmail
-      if (userData.githubEmail !== undefined) employeeUpdates.github_email = userData.githubEmail
-      if (userData.zoomEmail !== undefined) employeeUpdates.zoom_email = userData.zoomEmail
-      if (userData.note !== undefined) employeeUpdates.note = userData.note
-      if (userData.profilePhoto !== undefined) employeeUpdates.profile_photo = userData.profilePhoto
-      if (userData.theme !== undefined) employeeUpdates.theme = userData.theme
-      if (userData.preferredLanguage !== undefined) employeeUpdates.preferred_language = userData.preferredLanguage
-      if (userData.overallAssessment !== undefined) employeeUpdates.overall_assessment = userData.overallAssessment
+      // Remove account fields from employee updates and keep the rest
+      const { login_email, ...employeeData } = data
+      Object.assign(employeeUpdates, employeeData)
 
-      // Update account if there are account changes
+      // Update account if needed
       if (Object.keys(accountUpdates).length > 0) {
-        const { error: accountError } = await SupabaseService.updateAccount(user.accountId, accountUpdates)
+        const { error: accountError } = await SupabaseService.updateAccount(account.id, accountUpdates)
         if (accountError) {
           throw new Error(`Failed to update account: ${accountError.message}`)
         }
       }
 
-      // Update employee if there are employee changes
+      // Update employee if needed
       if (Object.keys(employeeUpdates).length > 0) {
-        const { error: employeeError } = await SupabaseService.updateEmployee(user.employeeId, employeeUpdates)
+        const { error: employeeError } = await SupabaseService.updateEmployee(employee.id, employeeUpdates)
         if (employeeError) {
           throw new Error(`Failed to update employee: ${employeeError.message}`)
-      }
-      }
-
-      // Reload user data to get the updated information
-      const { data: updatedUserData, error: loadError } = await SupabaseService.getFullUserByAccountId(user.accountId)
-      
-      if (loadError || !updatedUserData) {
-        throw new Error('Failed to reload user data after update')
+        }
       }
 
-      setUser(updatedUserData)
-      applyTheme(updatedUserData.theme || 'light')
+      // Reload profile data
+      const { data: profileData, error: loadError } = await SupabaseService.getEmployeeByAccountId(account.id)
       
-      console.log('User updated successfully')
+      if (loadError || !profileData) {
+        throw new Error('Failed to reload profile data after update')
+      }
+
+      setAccount(profileData.account)
+      setEmployee(profileData.employee)
+      applyTheme(profileData.employee.theme || 'light')
+      
+      console.log('Profile updated successfully')
     } catch (error) {
-      console.error("Error updating user:", error)
+      console.error("Error updating profile:", error)
       throw error
     }
   }
 
+
+
   const signOut = async () => {
     try {
       console.log('Signing out...')
-    const { error } = await SupabaseService.signOut()
-    if (error) {
-      console.error('Error signing out:', error)
-    }
-    setUser(null)
-    applyTheme('light')
+      const { error } = await SupabaseService.signOut()
+      if (error) {
+        console.error('Error signing out:', error)
+      }
+      setAccount(null)
+      setEmployee(null)
+      applyTheme('light')
       console.log('Signout successful')
     } catch (error) {
       console.error('Unexpected signout error:', error)
     }
   }
 
-  const isAdmin = () => user?.accessLevel === "admin"
-  const isMember = () => user?.accessLevel === "member"
-  const isOwner = () => user?.accessLevel === "owner"
+  const isAdmin = () => account?.access_level === "admin"
+  const isMember = () => account?.access_level === "member"
+  const isOwner = () => account?.access_level === "owner"
 
   return (
     <AuthContext.Provider
       value={{
-        user,
+        account,
+        employee,
         loading,
         signOut,
         isAdmin,
@@ -333,8 +422,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isOwner,
         signIn,
         signUp,
-        updateUser,
-        userClaims: user ? { role: user.accessLevel } : null,
+        updateProfile,
+        ensureValidSession
       }}
     >
       {children}

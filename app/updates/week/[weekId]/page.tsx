@@ -9,14 +9,15 @@ import { Calendar, MessageSquare, ImageIcon, ArrowLeft } from "lucide-react"
 import { useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
-import type { DailyUpdate, User } from "@/types"
+import { SupabaseService } from "@/lib/supabase"
+import type { DailyUpdate, Employee } from "@/types"
 
 const EMOJI_OPTIONS = ["👍", "🔥", "✅", "💪", "🎯", "⭐", "👏", "🚀"]
 
 export default function WeeklyUpdatesPage() {
-  const { user, isAdmin } = useAuth()
+  const { employee, account, isAdmin } = useAuth()
   const [updates, setUpdates] = useState<DailyUpdate[]>([])
-  const [users, setUsers] = useState<User[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedUpdate, setSelectedUpdate] = useState<DailyUpdate | null>(null)
   const [comment, setComment] = useState("")
@@ -25,100 +26,100 @@ export default function WeeklyUpdatesPage() {
   const weekId = params.weekId as string
 
   useEffect(() => {
-    if (!user) {
+    if (!employee || !account) {
       router.push("/login")
       return
     }
 
     loadData()
-    setLoading(false)
-  }, [user, router, weekId])
+  }, [employee, account, router, weekId])
 
-  const loadData = () => {
-    if (typeof window !== "undefined") {
-      // Load all users to get names
-      const storedUsers = localStorage.getItem("allUsers")
-      if (storedUsers) {
-        setUsers(JSON.parse(storedUsers))
-      }
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      
+      // Load all employees to get names
+      const { data: employeesData, error: employeesError } = await SupabaseService.getEmployees()
+      if (employeesError) throw new Error('Failed to load employees')
+      if (employeesData) setEmployees(employeesData)
 
       // Load daily updates for the week
-      const allUpdates: DailyUpdate[] = []
-
-      // Get updates from all users for this week
-      const storedUsersData = localStorage.getItem("allUsers")
-      if (storedUsersData) {
-        const usersData = JSON.parse(storedUsersData) as User[]
-
-        usersData.forEach((userData) => {
-          const userUpdates = localStorage.getItem(`dailyUpdates_${userData.uid}`)
-          if (userUpdates) {
-            const updatesData = JSON.parse(userUpdates) as DailyUpdate[]
-            const weekUpdates = updatesData.filter((update) => update.weekId === weekId)
-            allUpdates.push(...weekUpdates)
-          }
+      const { data: updatesData, error: updatesError } = await SupabaseService.getDailyUpdates()
+      if (updatesError) throw new Error('Failed to load updates')
+      
+      if (updatesData) {
+        // Filter updates for the specific week and sort by date
+        const weekDate = new Date()
+        weekDate.setDate(weekDate.getDate() - (parseInt(weekId) * 7))
+        const weekStart = new Date(weekDate.setDate(weekDate.getDate() - weekDate.getDay()))
+        const weekEnd = new Date(weekDate.setDate(weekDate.getDate() + 6))
+        
+        const weekUpdates = updatesData.filter(update => {
+          const updateDate = new Date(update.date)
+          return updateDate >= weekStart && updateDate <= weekEnd
         })
+        
+        weekUpdates.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        setUpdates(weekUpdates)
       }
-
-      // Sort by date
-      allUpdates.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      setUpdates(allUpdates)
+    } catch (error) {
+      console.error('Error loading data:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
-  const getUserName = (uid: string) => {
-    return users.find((u) => u.uid === uid)?.name || "Unknown User"
+  const getUserName = (employeeId: string) => {
+    const employee = employees.find((e) => e.id === employeeId)
+    return employee ? `${employee.first_name} ${employee.last_name}` : "Unknown Employee"
   }
 
-  const handleEmojiReact = (updateId: string, emoji: string) => {
+  const handleEmojiReact = async (updateId: string, emoji: string) => {
     if (!isAdmin()) return
 
-    const updatedUpdates = updates.map((update) => {
-      if (update.id === updateId) {
-        return { ...update, emoji }
-      }
-      return update
-    })
+    try {
+      // Update the daily update with new emoji reaction
+      const { error } = await SupabaseService.updateDailyUpdate(updateId, { 
+        emoji_reaction: emoji 
+      })
 
-    setUpdates(updatedUpdates)
+      if (error) throw error
 
-    // Update in localStorage for the specific user
-    const update = updates.find((u) => u.id === updateId)
-    if (update) {
-      const userUpdates = localStorage.getItem(`dailyUpdates_${update.uid}`)
-      if (userUpdates) {
-        const updatesData = JSON.parse(userUpdates) as DailyUpdate[]
-        const updatedUserUpdates = updatesData.map((u) => (u.id === updateId ? { ...u, emoji } : u))
-        localStorage.setItem(`dailyUpdates_${update.uid}`, JSON.stringify(updatedUserUpdates))
-      }
+      // Update local state
+      setUpdates(updates.map(update => 
+        update.id === updateId 
+          ? { ...update, emoji_reaction: emoji }
+          : update
+      ))
+    } catch (error) {
+      console.error('Error updating emoji reaction:', error)
     }
   }
 
-  const handleAddComment = (updateId: string) => {
-    if (!isAdmin() || !comment.trim()) return
+  const handleAddComment = async (updateId: string) => {
+    if (!isAdmin() || !comment.trim() || !employee) return
 
-    const updatedUpdates = updates.map((update) => {
-      if (update.id === updateId) {
-        return { ...update, comment: comment.trim() }
-      }
-      return update
-    })
+    try {
+      // Update the daily update with new comment
+      const { error } = await SupabaseService.updateDailyUpdate(updateId, {
+        admin_comment: comment.trim(),
+        admin_id: employee.id
+      })
 
-    setUpdates(updatedUpdates)
+      if (error) throw error
 
-    // Update in localStorage for the specific user
-    const update = updates.find((u) => u.id === updateId)
-    if (update) {
-      const userUpdates = localStorage.getItem(`dailyUpdates_${update.uid}`)
-      if (userUpdates) {
-        const updatesData = JSON.parse(userUpdates) as DailyUpdate[]
-        const updatedUserUpdates = updatesData.map((u) => (u.id === updateId ? { ...u, comment: comment.trim() } : u))
-        localStorage.setItem(`dailyUpdates_${update.uid}`, JSON.stringify(updatedUserUpdates))
-      }
+      // Update local state
+      setUpdates(updates.map(update => 
+        update.id === updateId 
+          ? { ...update, admin_comment: comment.trim(), admin_id: employee.id }
+          : update
+      ))
+
+      setComment("")
+      setSelectedUpdate(null)
+    } catch (error) {
+      console.error('Error updating comment:', error)
     }
-
-    setComment("")
-    setSelectedUpdate(null)
   }
 
   if (loading) {
@@ -170,8 +171,8 @@ export default function WeeklyUpdatesPage() {
                   <div className="flex justify-between items-start">
                     <div>
                       <CardTitle className="flex items-center gap-2">
-                        <span>{getUserName(update.uid)}</span>
-                        {update.emoji && <span className="text-2xl">{update.emoji}</span>}
+                        <span>{getUserName(update.employee_id)}</span>
+                        {update.emoji_reaction && <span className="text-2xl">{update.emoji_reaction}</span>}
                       </CardTitle>
                       <CardDescription>
                         {new Date(update.date).toLocaleDateString("en-US", {
@@ -188,18 +189,18 @@ export default function WeeklyUpdatesPage() {
                 <CardContent className="space-y-4">
                   {/* Update Text */}
                   <div className="prose max-w-none">
-                    <p className="whitespace-pre-wrap text-gray-700">{update.text}</p>
+                    <p className="whitespace-pre-wrap text-gray-700">{update.description}</p>
                   </div>
 
                   {/* Screenshot */}
-                  {update.screenshot && (
+                  {update.screenshot_path && (
                     <div className="border rounded-lg p-4 bg-gray-50">
                       <div className="flex items-center gap-2 mb-2">
                         <ImageIcon className="h-4 w-4 text-gray-500" />
                         <span className="text-sm text-gray-600">Screenshot attached</span>
                       </div>
                       <img
-                        src={update.screenshot || "/placeholder.svg"}
+                        src={update.screenshot_path || "/placeholder.svg"}
                         alt="Daily update screenshot"
                         className="max-w-full h-auto rounded border"
                       />
@@ -216,14 +217,14 @@ export default function WeeklyUpdatesPage() {
                           {EMOJI_OPTIONS.map((emoji) => (
                             <Button
                               key={emoji}
-                              variant={update.emoji === emoji ? "default" : "outline"}
+                              variant={update.emoji_reaction === emoji ? "default" : "outline"}
                               size="sm"
                               onClick={() => handleEmojiReact(update.id, emoji)}
                             >
                               {emoji}
                             </Button>
                           ))}
-                          {update.emoji && (
+                          {update.emoji_reaction && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -239,17 +240,17 @@ export default function WeeklyUpdatesPage() {
                       {/* Comments */}
                       <div>
                         <label className="text-sm font-medium text-gray-700 mb-2 block">Leave feedback:</label>
-                        {update.comment ? (
+                        {update.admin_comment ? (
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                             <p className="text-sm text-blue-800">
-                              <strong>Your feedback:</strong> {update.comment}
+                              <strong>Your feedback:</strong> {update.admin_comment}
                             </p>
                             <Button
                               variant="link"
                               size="sm"
                               onClick={() => {
                                 setSelectedUpdate(update)
-                                setComment(update.comment || "")
+                                setComment(update.admin_comment || "")
                               }}
                               className="text-blue-600 p-0 h-auto"
                             >

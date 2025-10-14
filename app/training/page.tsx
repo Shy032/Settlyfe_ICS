@@ -27,20 +27,20 @@ const FeedbackTab = () => {
 }
 
 export default function TrainingPage() {
-  const { user, isAdmin, isOwner, loading } = useAuth()
+  const { account, employee, isAdmin, isOwner, loading } = useAuth()
   const [activeTab, setActiveTab] = useState("")
   const router = useRouter()
   const isMobile = useIsMobile()
 
   useEffect(() => {
-    if (user) {
+    if (account && employee) {
       if (isAdmin() || isOwner()) {
         setActiveTab("manage-courses")
       } else {
         setActiveTab("my-training")
       }
     }
-  }, [user, isAdmin, isOwner])
+  }, [account, employee, isAdmin, isOwner])
 
   if (loading) {
     return (
@@ -53,7 +53,7 @@ export default function TrainingPage() {
     )
   }
 
-  if (!user) {
+  if (!account || !employee) {
     return (
       <div className="container mx-auto p-6 text-center">
         <h1 className="text-2xl font-bold mb-4">Access Denied</h1>

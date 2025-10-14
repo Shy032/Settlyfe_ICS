@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+// Removed Select components - no longer needed for simplified signup
 import { Eye, EyeOff } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -17,8 +17,7 @@ export default function SignUpPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [name, setName] = useState("")
-  const [accessLevel, setAccessLevel] = useState<"owner" | "admin" | "member">("member")
+  // Removed firstName, lastName, and accessLevel fields - will be set after login
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -65,19 +64,14 @@ export default function SignUpPage() {
     }
 
     try {
-      const result = await signUp(email, password, {
-        name,
-        accessLevel,
-        theme: "light",
-        preferredLanguage: "en"
-      })
+      const result = await signUp(email, password)
       
       if (result.error) {
         setError(result.error)
         return
       }
 
-      setSuccess("Account created successfully! Please check your email to verify your account.")
+      setSuccess("Account created successfully! Please check your email to verify your account. You'll be able to complete your profile after verification.")
       
       // Redirect after 2 seconds
       setTimeout(() => {
@@ -96,23 +90,10 @@ export default function SignUpPage() {
       <div className="w-full max-w-md border border-gray-300 bg-white p-8">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Create Account</h1>
-          <p className="text-gray-600">Sign up for Settlyfe Scoreboard</p>
+          <p className="text-gray-600">Sign up for Settlyfe Scoreboard - Complete your profile after verification</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="name">Full Name</Label>
-            <Input
-              id="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your full name"
-              required
-              className="bg-white border-gray-300"
-            />
-          </div>
-
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -124,20 +105,6 @@ export default function SignUpPage() {
               required
               className="bg-white border-gray-300"
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="accessLevel">Access Level</Label>
-            <Select value={accessLevel} onValueChange={(value: "owner" | "admin" | "member") => setAccessLevel(value)}>
-              <SelectTrigger className="bg-white border-gray-300">
-                <SelectValue placeholder="Select your access level" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="owner">Owner</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="member">Member</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="space-y-2">

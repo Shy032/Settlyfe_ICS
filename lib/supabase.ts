@@ -1,5 +1,6 @@
-import { createClient } from '@supabase/supabase-js'
-import type { Account, Employee, User } from '@/types'
+import { createBrowserClient } from '@supabase/ssr'
+import type { Account, Employee } from '@/types'
+import { getFullName } from '@/types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -10,28 +11,23 @@ console.log('Supabase Config:', {
   key: supabaseAnonKey ? 'Set' : 'Missing'
 })
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  global: {
-    headers: {
-      'Access-Control-Allow-Origin': '*'
-    }
-  }
-})
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
 // Database operations wrapper
 export class SupabaseService {
-  // User authentication
-  static async signUp(email: string, password: string, userData: any) {
+  // Authentication and Account Management
+  static async signUp(email: string, password: string) {
     console.log('Attempting signup...')
     const { data, error } = await supabase.auth.signUp({
       email,
-      password,
-      options: {
-        data: userData
-      }
+      password
     })
     if (error) console.error('Signup error:', error)
-    else console.log('Signup successful')
+    else {
+      console.log('Signup successful')
+      // Note: Audit log will be created later when the employee profile is created
+      // Cannot create audit log here because employee record doesn't exist yet
+    }
     return { data, error }
   }
 
@@ -42,7 +38,16 @@ export class SupabaseService {
       password
     })
     if (error) console.error('Signin error:', error)
-    else console.log('Signin successful')
+    else {
+      console.log('Signin successful')
+      await this.auditLog({
+        employee_id: data.user?.id,
+        action_type: 'signin',
+        object_type: 'account',
+        object_id: data.user?.id,
+        change_summary: 'User signed in'
+      })
+    }
     return { data, error }
   }
 
@@ -54,21 +59,21 @@ export class SupabaseService {
     return { error }
   }
 
-  static async getCurrentUser() {
+  static async getCurrentAuth() {
     const { data: { user } } = await supabase.auth.getUser()
     return user
   }
 
   // Account operations
-  static async getAccountById(accountId: string) {
-    console.log('Fetching account by ID:', accountId)
+  static async getAccountById(account_id: string) {
+    console.log('Fetching account by ID:', account_id)
     const { data, error } = await supabase
       .from('account')
       .select(`
         *,
         employee:employee_id (*)
       `)
-      .eq('id', accountId)
+      .eq('id', account_id)
       .single()
     
     if (error) console.error('Get account error:', error)
@@ -92,28 +97,25 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createAccount(accountData: any) {
-    console.log('Creating account:', accountData.login_email)
-    const { data, error } = await supabase
-      .from('account')
-      .insert([accountData])
-      .select()
-    
-    if (error) console.error('Create account error:', error)
-    else console.log('Account created:', data)
-    return { data, error }
-  }
-
-  static async updateAccount(accountId: string, accountData: any) {
-    console.log('Updating account:', accountId)
+  static async updateAccount(account_id: string, accountData: Partial<Account>) {
+    console.log('Updating account:', account_id)
     const { data, error } = await supabase
       .from('account')
       .update(accountData)
-      .eq('id', accountId)
+      .eq('id', account_id)
       .select()
     
     if (error) console.error('Update account error:', error)
-    else console.log('Account updated')
+    else {
+      console.log('Account updated')
+      await this.auditLog({
+        employee_id: accountData.employee_id || '',
+        action_type: 'update',
+        object_type: 'account',
+        object_id: account_id,
+        change_summary: `Updated account fields: ${Object.keys(accountData).join(', ')}`
+      })
+    }
     return { data, error }
   }
 
@@ -124,6 +126,7 @@ export class SupabaseService {
       .from('employee')
       .select(`
         *,
+        account!employee_id (login_email, access_level, status),
         team:team_id (*),
         department:department_id (*)
       `)
@@ -134,16 +137,17 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async getEmployeeById(employeeId: string) {
-    console.log('Fetching employee by ID:', employeeId)
+  static async getEmployeeById(employee_id: string) {
+    console.log('Fetching employee by ID:', employee_id)
     const { data, error } = await supabase
       .from('employee')
       .select(`
         *,
+        account!employee_id (login_email, access_level, status),
         team:team_id (*),
         department:department_id (*)
       `)
-      .eq('id', employeeId)
+      .eq('id', employee_id)
       .single()
     
     if (error) console.error('Get employee error:', error)
@@ -151,51 +155,43 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createEmployee(employeeData: any) {
-    console.log('Creating employee:', employeeData.first_name, employeeData.last_name)
-    const { data, error } = await supabase
-      .from('employee')
-      .insert([employeeData])
-      .select()
-    
-    if (error) console.error('Create employee error:', error)
-    else console.log('Employee created:', data)
-    return { data, error }
-  }
-
-  static async updateEmployee(employeeId: string, employeeData: any) {
-    console.log('Updating employee:', employeeId)
+  static async updateEmployee(employee_id: string, employeeData: Partial<Employee>) {
+    console.log('Updating employee:', employee_id)
     const { data, error } = await supabase
       .from('employee')
       .update(employeeData)
-      .eq('id', employeeId)
+      .eq('id', employee_id)
       .select()
     
     if (error) console.error('Update employee error:', error)
-    else console.log('Employee updated')
+    else {
+      console.log('Employee updated')
+      await this.auditLog({
+        employee_id,
+        action_type: 'update',
+        object_type: 'employee',
+        object_id: employee_id,
+        change_summary: `Updated employee fields: ${Object.keys(employeeData).join(', ')}`
+      })
+    }
     return { data, error }
   }
 
-  // User creation during signup (creates both account and employee)
-  static async createUserProfile(userData: {
-    accountId: string
+  // Create both account and employee during signup
+  // first_name and last_name are optional - will use placeholders if not provided
+  static async createEmployeeProfile(data: {
+    account_id: string
     email: string
-    firstName: string
-    lastName: string
-    role?: string
-    teamId?: string
-    departmentId?: string
-    theme?: string
-    preferredLanguage?: string
+    first_name?: string
+    last_name?: string
+    access_level: string
   }) {
-    console.log('Creating user profile for:', userData.email)
+    console.log('Creating employee profile for:', data.email)
     
     try {
-      // Use the atomic database function that bypasses RLS
-      console.log('Calling atomic user profile creation function with data:', userData)
-      
-      const { data: result, error } = await supabase.rpc('create_user_profile_atomic', {
-        user_data: userData
+      // Use atomic database function that handles both account and employee creation
+      const { data: result, error } = await supabase.rpc('create_employee_profile_atomic', {
+        profile_data: data
       })
       
       if (error) {
@@ -205,7 +201,7 @@ export class SupabaseService {
                            error?.details || 
                            JSON.stringify(error) || 
                            'Unknown database function error'
-        throw new Error(`Failed to create user profile: ${errorMessage}`)
+        throw new Error(`Failed to create employee profile: ${errorMessage}`)
       }
       
       if (!result || !result.success) {
@@ -213,9 +209,12 @@ export class SupabaseService {
         throw new Error(result?.message || 'Unknown error from database function')
       }
       
-      console.log('User profile created successfully via database function')
+      console.log('Employee profile created successfully')
       
-      return { 
+      // Note: Audit log is already created by the database function
+      // No need to create a duplicate audit log entry here
+      
+      return {
         data: {
           account: result.account,
           employee: result.employee
@@ -223,20 +222,23 @@ export class SupabaseService {
         error: null 
       }
     } catch (error: any) {
-      console.error('Error in createUserProfile:', error)
+      console.error('Error in createEmployeeProfile:', error)
       return { data: null, error: { message: error.message } }
     }
   }
 
-  // Get full user data (account + employee) by account ID
-  static async getFullUserByAccountId(accountId: string) {
-    console.log('Fetching full user data for account:', accountId)
+  // Get complete employee data by account ID
+  static async getEmployeeByAccountId(account_id: string) {
+    console.log('Fetching employee data for account:', account_id)
     
-    // First get the account data
+    // Get the account with associated employee data
     const { data: accountData, error: accountError } = await supabase
       .from('account')
-      .select('*')
-      .eq('id', accountId)
+      .select(`
+        *,
+        employee:employee_id (*)
+      `)
+      .eq('id', account_id)
       .single()
 
     if (accountError) {
@@ -244,54 +246,26 @@ export class SupabaseService {
       return { data: null, error: accountError }
     }
 
-    if (!accountData.employee_id) {
-      console.error('No employee_id found in account:', accountId)
-      return { data: null, error: { message: 'Employee ID not found in account' } }
+    if (!accountData.employee_id || !accountData.employee) {
+      console.error('No employee found for account:', account_id)
+      return { data: null, error: { message: 'No employee profile found for account' } }
     }
 
-    // Then get the employee data separately
-    const { data: employeeData, error: employeeError } = await supabase
-      .from('employee')
-      .select('*')
-      .eq('id', accountData.employee_id)
-      .single()
-
-    if (employeeError) {
-      console.error('Get employee error:', employeeError)
-      return { data: null, error: employeeError }
+    const result = {
+      account: {
+        id: accountData.id,
+        login_email: accountData.login_email,
+        access_level: accountData.access_level,
+        status: accountData.status,
+        employee_id: accountData.employee_id,
+        created_at: accountData.created_at,
+        updated_at: accountData.updated_at
+      } as Account,
+      employee: accountData.employee as Employee
     }
 
-    // Convert to User interface
-    const user: User = {
-      accountId: accountData.id,
-      loginEmail: accountData.login_email,
-      accessLevel: accountData.access_level,
-      accountStatus: accountData.status,
-      employeeId: employeeData.id,
-      firstName: employeeData.first_name,
-      lastName: employeeData.last_name,
-      name: `${employeeData.first_name} ${employeeData.last_name}`,
-      title: employeeData.title,
-      role: employeeData.role,
-      teamId: employeeData.team_id,
-      departmentId: employeeData.department_id,
-      joinDate: employeeData.join_date,
-      status: employeeData.status,
-      overallAssessment: employeeData.overall_assessment,
-      phone: employeeData.phone,
-      personalEmail: employeeData.personal_email,
-      githubEmail: employeeData.github_email,
-      zoomEmail: employeeData.zoom_email,
-      note: employeeData.note,
-      profilePhoto: employeeData.profile_photo,
-      theme: employeeData.theme || 'light',
-      preferredLanguage: employeeData.preferred_language || 'en',
-      createdAt: accountData.created_at,
-      updatedAt: accountData.updated_at
-    }
-
-    console.log('Full user data retrieved')
-    return { data: user, error: null }
+    console.log('Employee data retrieved')
+    return { data: result, error: null }
   }
 
   // Team operations
@@ -310,7 +284,11 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createTeam(teamData: any) {
+  static async createTeam(teamData: {
+    name: string
+    lead_employee_id?: string
+    parent_team_id?: string
+  }) {
     console.log('Creating team:', teamData.name)
     const { data, error } = await supabase
       .from('team')
@@ -318,7 +296,18 @@ export class SupabaseService {
       .select()
     
     if (error) console.error('Create team error:', error)
-    else console.log('Team created')
+    else {
+      console.log('Team created')
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: teamData.lead_employee_id,
+          action_type: 'create',
+          object_type: 'team',
+          object_id: data[0].id,
+          change_summary: `Created team: ${teamData.name}`
+        })
+      }
+    }
     return { data, error }
   }
 
@@ -361,7 +350,14 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createDailyUpdate(updateData: any) {
+  static async createDailyUpdate(updateData: {
+    employee_id: string;
+    date: string;
+    description: string;
+    task_id?: string;
+    location?: string;
+    screenshot_path?: string;
+  }) {
     console.log('Creating daily update...')
     const { data, error } = await supabase
       .from('daily_update')
@@ -376,7 +372,7 @@ export class SupabaseService {
       // 3) right here—after successful creation—write your audit entry
       const upd = data[0]
       await SupabaseService.auditLog({
-        employee_id:   upd.uid,                       // who did it
+        employee_id: upd.employee_id,
         action_type:   'create',                      // what happened
         object_type:   'daily_update',                // on which entity
         object_id:     upd.id,                        // the new record’s PK
@@ -386,7 +382,14 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async updateDailyUpdate(id: string, updateData: any) {
+  static async updateDailyUpdate(id: string, updateData: Partial<{
+    employee_id: string;
+    date: string;
+    description: string;
+    task_id?: string;
+    location?: string;
+    screenshot_path?: string;
+  }>) {
     console.log('Updating daily update:', id)
     const { data, error } = await supabase
       .from('daily_update')
@@ -398,11 +401,11 @@ export class SupabaseService {
       console.log('Daily update updated')
 
       await SupabaseService.auditLog({
-        employee_id:   data[0].uid,
-        action_type:   'update',
-        object_type:   'daily_update',
-        object_id:     id,
-        change_summary:`Updated fields: ${Object.keys(updateData).join(', ')}`
+        employee_id: data[0].employee_id,
+        action_type: 'update',
+        object_type: 'daily_update',
+        object_id: id,
+        change_summary: `Updated fields: ${Object.keys(updateData).join(', ')}`
       })
     }
     return { data, error }
@@ -433,7 +436,15 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createClockinSession(sessionData: any) {
+  static async createClockinSession(sessionData: {
+    employee_id: string
+    date: string
+    start_time: string
+    end_time?: string
+    duration?: string
+    hours?: number
+    description?: string
+  }) {
     console.log('Creating clock-in session:', sessionData)
     const { data, error } = await supabase
       .from('clockin_session')
@@ -441,12 +452,31 @@ export class SupabaseService {
       .select()
 
     if (error) console.error('Create clock-in session error:', error)
-    else console.log('Clock-in session created:', data)
+    else {
+      console.log('Clock-in session created:', data)
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: sessionData.employee_id,
+          action_type: 'create',
+          object_type: 'clockin_session',
+          object_id: data[0].id,
+          change_summary: `Created clock-in session for ${sessionData.date}`
+        })
+      }
+    }
 
     return { data, error }
   }
 
-  static async updateClockinSession(id: string, sessionData: any) {
+  static async updateClockinSession(id: string, sessionData: Partial<{
+    employee_id: string
+    date: string
+    start_time: string
+    end_time?: string
+    duration?: string
+    hours?: number
+    description?: string
+  }>) {
     console.log('Updating clock-in session:', id, sessionData)
     const { data, error } = await supabase
       .from('clockin_session')
@@ -462,6 +492,13 @@ export class SupabaseService {
         console.warn('⚠️ Update successful but no rows were affected. This might be due to RLS policies or the record not existing.')
       } else {
         console.log('✅ Clock-in session successfully updated:', data[0])
+        await this.auditLog({
+          employee_id: sessionData.employee_id,
+          action_type: 'update',
+          object_type: 'clockin_session',
+          object_id: id,
+          change_summary: `Updated clock-in session fields: ${Object.keys(sessionData).join(', ')}`
+        })
       }
     }
 
@@ -475,11 +512,7 @@ export class SupabaseService {
     console.log('Fetching weekly scores...')
     let query = supabase
       .from('weekly_credit_score')
-      .select(`
-        *,
-        employee!fk_weekly_score_employee (first_name, last_name, personal_email),
-        admin:employee!fk_weekly_score_admin (first_name, last_name)
-      `)
+      .select('*')
       .order('year', { ascending: false })
       .order('week_number', { ascending: false })
       .limit(limit)
@@ -496,18 +529,46 @@ export class SupabaseService {
     return { data, error }
   }
 
-  static async createWeeklyScore(scoreData: any) {
+  static async createWeeklyScore(scoreData: {
+    employee_id: string
+    admin_id: string
+    week_number: number
+    year: number
+    effort_credit: number
+    outcome_credit: number
+    collab_credit: number
+    wcs: number
+    checkmarks: number
+  }) {
     console.log('Creating weekly score...')
     const { data, error } = await supabase
       .from('weekly_credit_score')
       .insert([scoreData])
       .select()
     if (error) console.error('Create weekly score error:', error)
-    else console.log('Weekly score created')
+    else {
+      console.log('Weekly score created')
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: scoreData.admin_id,
+          action_type: 'create',
+          object_type: 'weekly_credit_score',
+          object_id: data[0].id,
+          change_summary: `Created weekly score for ${scoreData.employee_id}, week ${scoreData.week_number}/${scoreData.year}`
+        })
+      }
+    }
     return { data, error }
   }
 
-  static async updateWeeklyScore(employeeId: string, weekNumber: number, year: number, scoreData: any) {
+  static async updateWeeklyScore(employeeId: string, weekNumber: number, year: number, scoreData: Partial<{
+    admin_id: string
+    effort_credit: number
+    outcome_credit: number
+    collab_credit: number
+    wcs: number
+    checkmarks: number
+  }>) {
     console.log('Updating weekly score:', employeeId, weekNumber, year)
     const { data, error } = await supabase
       .from('weekly_credit_score')
@@ -517,65 +578,278 @@ export class SupabaseService {
       .eq('year', year)
       .select()
     if (error) console.error('Update weekly score error:', error)
-    else console.log('Weekly score updated')
+    else {
+      console.log('Weekly score updated')
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: scoreData.admin_id,
+          action_type: 'update',
+          object_type: 'weekly_credit_score',
+          object_id: data[0].id,
+          change_summary: `Updated weekly score fields: ${Object.keys(scoreData).join(', ')}`
+        })
+      }
+    }
     return { data, error }
   }
 
-  // Tasks operations
-  static async getTasks(teamId?: string, employeeId?: string) {
-    console.log('Fetching tasks...')
+  // Quarter Score operations
+  static async getQuarterScores(employeeId?: string) {
+    console.log('Fetching quarter scores...')
     let query = supabase
-      .from('task')
+      .from('quarter_score')
       .select(`
         *,
-        admin:employee!fk_task_admin (first_name, last_name),
-        task_assignment!fk_task_assignment_task (
-          assignee:employee!fk_task_assignment_assignee (first_name, last_name, team_id)
-        )
+        employee:employee_id (first_name, last_name)
       `)
-      .order('created_at', { ascending: false })
+      .order('year', { ascending: false })
+      .order('quarter_number', { ascending: false })
 
-    // If filtering by team or employee, we need to join with assignments
-    if (teamId || employeeId) {
-      if (employeeId) {
-        query = query.eq('task_assignment.assignee_id', employeeId)
-      } else if (teamId) {
-        query = query.eq('task_assignment.assignee.team_id', teamId)
-      }
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId)
     }
 
     const { data, error } = await query
-    if (error) console.error('Get tasks error:', error)
-    else console.log('Tasks fetched:', data?.length)
+    if (error) console.error('Get quarter scores error:', error)
     return { data, error }
   }
 
-  static async createTask(taskData: any) {
-    console.log('Creating task...')
+  static async createQuarterScore(scoreData: {
+    employee_id: string
+    year: number
+    quarter_number: number
+    qs: number
+    cumulative_checkmarks: number
+    assessment?: string
+  }) {
+    console.log('Creating quarter score...')
     const { data, error } = await supabase
-      .from('task')
-      .insert([taskData])
+      .from('quarter_score')
+      .insert([scoreData])
       .select()
 
-    if (error) {
-      console.error("Error saving to Supabase:", JSON.stringify(error, null, 2))
+    if (!error && data?.length) {
+      await this.auditLog({
+        employee_id: scoreData.employee_id,
+        action_type: 'create',
+        object_type: 'quarter_score',
+        object_id: data[0].id,
+        change_summary: `Created Q${scoreData.quarter_number}/${scoreData.year} score`
+      })
     }
-    else console.log('Task created')
-    console.log("Returned Supabase data:", data)
     return { data, error }
   }
 
-  static async updateTask(id: string, taskData: any) {
-    console.log('Updating task:', id)
+  // Executive Decision operations
+  static async getExecutiveDecisions() {
+    console.log('Fetching executive decisions...')
     const { data, error } = await supabase
-      .from('task')
-      .update(taskData)
+      .from('executive_decision')
+      .select(`
+        *,
+        admin:admin_id (first_name, last_name)
+      `)
+      .order('created_at', { ascending: false })
+    return { data, error }
+  }
+
+  static async createExecutiveDecision(decisionData: {
+    admin_id: string
+    title: string
+    description: string
+    date: string
+  }) {
+    console.log('Creating executive decision...')
+    const { data, error } = await supabase
+      .from('executive_decision')
+      .insert([decisionData])
+      .select()
+
+    if (!error && data?.length) {
+      await this.auditLog({
+        employee_id: decisionData.admin_id,
+        action_type: 'create',
+        object_type: 'executive_decision',
+        object_id: data[0].id,
+        change_summary: `Created decision: ${decisionData.title}`
+      })
+    }
+    return { data, error }
+  }
+
+  // PTO Request operations
+  static async getPTORequests(employeeId?: string) {
+    console.log('Fetching PTO requests...')
+    let query = supabase
+      .from('pto_request')
+      .select(`
+        *,
+        employee:employee_id (first_name, last_name),
+        approver:approved_by (first_name, last_name)
+      `)
+      .order('request_date', { ascending: false })
+
+    if (employeeId) {
+      query = query.eq('employee_id', employeeId)
+    }
+
+    const { data, error } = await query
+    return { data, error }
+  }
+
+  static async createPTORequest(requestData: {
+    employee_id: string
+    start_date: string
+    end_date: string
+    duration: number
+    reasoning: string
+    type: "urgent" | "planned"
+    impact: string
+    handover_details: string
+  }) {
+    console.log('Creating PTO request...')
+    const { data, error } = await supabase
+      .from('pto_request')
+      .insert([requestData])
+      .select()
+
+    if (!error && data?.length) {
+      await this.auditLog({
+        employee_id: requestData.employee_id,
+        action_type: 'create',
+        object_type: 'pto_request',
+        object_id: data[0].id,
+        change_summary: `Created PTO request for ${requestData.start_date} to ${requestData.end_date}`
+      })
+    }
+    return { data, error }
+  }
+
+  static async updatePTORequest(id: string, updateData: {
+    status: "pending" | "approved" | "rejected"
+    approved_by?: string
+    approve_comments?: string
+  }) {
+    console.log('Updating PTO request:', id)
+    const { data, error } = await supabase
+      .from('pto_request')
+      .update({
+        ...updateData,
+        approved_date: updateData.status === 'approved' ? new Date().toISOString() : null
+      })
       .eq('id', id)
       .select()
 
-    if (error) console.error('Update task error:', error)
-    else console.log('Task updated')
+    if (!error && data?.length) {
+      await this.auditLog({
+        employee_id: updateData.approved_by,
+        action_type: 'update',
+        object_type: 'pto_request',
+        object_id: id,
+        change_summary: `PTO request ${updateData.status}`
+      })
+    }
+    return { data, error }
+  }
 
+  // Poll operations
+  static async getPolls(includeOptions = false) {
+    console.log('Fetching polls...')
+    const { data, error } = await supabase
+      .from('poll')
+      .select(`
+        *,
+        admin:admin_id (first_name, last_name)
+        ${includeOptions ? ',options:poll_option(*)' : ''}
+      `)
+      .order('created_at', { ascending: false })
+    return { data, error }
+  }
+
+  static async createPoll(pollData: {
+    admin_id: string
+    title: string
+    selection_type: "single-choice" | "multi-select"
+    anonymous: boolean
+    result_visibility: "live" | "hidden_until_close"
+    options: string[]
+  }) {
+    const { title, options, ...rest } = pollData
+    
+    // Create poll
+    const { data: createdPoll, error: pollError } = await supabase
+      .from('poll')
+      .insert([{ title, ...rest }])
+      .select()
+      .single()
+
+    if (pollError || !createdPoll) return { data: null, error: pollError }
+
+    // Create options
+    const optionsData = options.map(text => ({
+      poll_id: createdPoll.id,
+      option_text: text
+    }))
+
+    const { error: optionsError } = await supabase
+      .from('poll_option')
+      .insert(optionsData)
+
+    if (optionsError) return { data: null, error: optionsError }
+
+    await this.auditLog({
+      employee_id: createdPoll.admin_id,
+      action_type: 'create',
+      object_type: 'poll',
+      object_id: createdPoll.id,
+      change_summary: `Created poll: ${title}`
+    })
+
+    return { data: createdPoll, error: null }
+  }
+
+  // Public Document operations
+  static async getPublicDocuments(visibility?: "everyone" | "team-only" | "department-only" | "admin-only") {
+    console.log('Fetching public documents...')
+    let query = supabase
+      .from('public_document')
+      .select(`
+        *,
+        uploader:uploaded_by (first_name, last_name)
+      `)
+      .order('upload_date', { ascending: false })
+
+    if (visibility) {
+      query = query.eq('visibility', visibility)
+    }
+
+    const { data, error } = await query
+    return { data, error }
+  }
+
+  static async createPublicDocument(documentData: {
+    visibility: "everyone" | "team-only" | "department-only" | "creator-only" | "admin-only"
+    file_path: string
+    type: string
+    title: string
+    description?: string
+    uploaded_by: string
+  }) {
+    console.log('Creating public document...')
+    const { data, error } = await supabase
+      .from('public_document')
+      .insert([documentData])
+      .select()
+
+    if (!error && data?.length) {
+      await this.auditLog({
+        employee_id: documentData.uploaded_by,
+        action_type: 'create',
+        object_type: 'public_document',
+        object_id: data[0].id,
+        change_summary: `Uploaded document: ${documentData.title}`
+      })
+    }
     return { data, error }
   }
 
@@ -597,22 +871,31 @@ export class SupabaseService {
     object_id,
     change_summary,
   }: {
-    employee_id: string;
+    employee_id?: string;
     action_type: string;
     object_type: string;
     object_id?: string;
     change_summary?: string;
   }) {
-    const { error } = await supabase
-      .from('audit_log')
-      .insert([{
-        employee_id,
-        action_type,
-        object_type,
-        object_id: object_id ?? null,
-        change_summary: change_summary ?? null,
-      }]);
-    if (error) console.error('auditLog error:', error);
+    try {
+      const { error } = await supabase
+        .from('audit_log')
+        .insert([{
+          employee_id,
+          action_type,
+          object_type,
+          object_id: object_id ?? null,
+          change_summary: change_summary ?? null,
+        }]);
+      
+      if (error) {
+        // If audit_log table doesn't exist or has issues, just log a warning instead of throwing an error
+        console.warn('Audit log failed (table may not exist):', error.message);
+      }
+    } catch (err) {
+      // Catch any other errors and just warn - don't let audit logging break the main functionality
+      console.warn('Audit log error caught:', err);
+    }
   }
 
 
@@ -625,5 +908,154 @@ export class SupabaseService {
 
 
 
+
+  // Tasks operations
+  static async getTasks(employeeId?: string, accessLevel?: string, teamId?: string) {
+    console.log('Fetching tasks with access control...')
+    let query = supabase
+      .from('task')
+      .select(`
+        *,
+        admin:admin_id (
+          id,
+          first_name,
+          last_name,
+          team_id
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    // Access control filtering
+    if (accessLevel === "owner" || accessLevel === "admin") {
+      // Owners and admins can see all tasks
+      console.log('Admin/Owner access: showing all tasks')
+    } else {
+      // Members can only see:
+      // 1. Tasks they created (admin_id = their id)
+      // 2. Tasks with visibility = "everyone"  
+      // 3. Tasks with visibility = "team-only" if they're in the same team
+      // 4. Tasks with visibility = "creator-only" if they created it
+      
+      if (employeeId && teamId) {
+        query = query.or(`admin_id.eq.${employeeId},visibility.eq.everyone,and(visibility.eq.team-only,admin_id.in.(select id from employee where team_id='${teamId}')),and(visibility.eq.creator-only,admin_id.eq.${employeeId})`)
+      } else if (employeeId) {
+        query = query.or(`admin_id.eq.${employeeId},visibility.eq.everyone,and(visibility.eq.creator-only,admin_id.eq.${employeeId})`)
+      } else {
+        // Fallback: only show public tasks
+        query = query.eq('visibility', 'everyone')
+      }
+    }
+
+    const { data, error } = await query
+    if (error) console.error('Get tasks error:', error)
+    else console.log('Tasks fetched with access control:', data?.length)
+    return { data, error }
+  }
+
+  static async createTask(taskData: {
+    admin_id: string
+    title: string
+    description?: string
+    publish_date: string
+    due_date?: string
+    completion_date?: string
+    priority: "low" | "medium" | "high"
+    visibility: "everyone" | "team-only" | "department-only" | "creator-only"
+    status: "not-started" | "in-progress" | "completed" | "cancelled"
+    progress: number
+    is_key_result: boolean
+    published: boolean
+    attachment_group_id?: string
+  }) {
+    console.log('Creating task:', taskData.title)
+    const { data, error } = await supabase
+      .from('task')
+      .insert([taskData])
+      .select()
+
+    if (error) {
+      console.error('Create task error:', error)
+      // Check if it's an authentication error
+      if (error.message?.includes('JWT') || error.message?.includes('expired') || error.code === 'PGRST301') {
+        console.warn('Authentication expired during task creation - user needs to refresh')
+        // You could trigger a refresh here or show a message
+      }
+    } else {
+      console.log('Task created')
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: taskData.admin_id,
+          action_type: 'create',
+          object_type: 'task',
+          object_id: data[0].id,
+          change_summary: `Created task: ${taskData.title}`
+        })
+      }
+    }
+    return { data, error }
+  }
+
+  static async updateTask(id: string, taskData: Partial<{
+    admin_id: string
+    title: string
+    description?: string
+    publish_date: string
+    due_date?: string
+    completion_date?: string
+    priority: "low" | "medium" | "high"
+    visibility: "everyone" | "team-only" | "department-only" | "creator-only"
+    status: "not-started" | "in-progress" | "completed" | "cancelled"
+    progress: number
+    is_key_result: boolean
+    published: boolean
+    attachment_group_id?: string
+  }>) {
+    console.log('Updating task:', id)
+    const { data, error } = await supabase
+      .from('task')
+      .update(taskData)
+      .eq('id', id)
+      .select()
+
+    if (error) console.error('Update task error:', error)
+    else {
+      console.log('Task updated')
+      if (data?.length) {
+        await this.auditLog({
+          employee_id: taskData.admin_id,
+          action_type: 'update',
+          object_type: 'task',
+          object_id: id,
+          change_summary: `Updated task fields: ${Object.keys(taskData).join(', ')}`
+        })
+      }
+    }
+    return { data, error }
+  }
+
+  static async deleteTask(id: string, adminId?: string) {
+    console.log('Deleting task:', id)
+    const { data, error } = await supabase
+      .from('task')
+      .delete()
+      .eq('id', id)
+      .select()
+
+    if (error) {
+      console.error('Delete task error:', error)
+    } else {
+      console.log('Task deleted successfully:', data)
+      if (adminId) {
+        await this.auditLog({
+          employee_id: adminId,
+          action_type: 'delete',
+          object_type: 'task',
+          object_id: id,
+          change_summary: `Deleted task with ID: ${id}`
+        })
+      }
+    }
+    return { data, error }
+  }
 
 } 

@@ -28,8 +28,8 @@ interface TimerProps {
 }
 
 export function Timer({ className }: TimerProps) {
-  const { user } = useAuth()
-  const { t } = useTranslation(user?.preferredLanguage as any)
+  const { account, employee, ensureValidSession } = useAuth()
+  const { t } = useTranslation(employee?.preferred_language as any)
   const [isRunning, setIsRunning] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
   const [elapsedTime, setElapsedTime] = useState(0)
@@ -39,8 +39,64 @@ export function Timer({ className }: TimerProps) {
   const [message, setMessage] = useState("")
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
   const [showOnlineUsers, setShowOnlineUsers] = useState(false)
+  const [saving, setSaving] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const presenceRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Timer persistence key
+  const TIMER_STORAGE_KEY = `timer_state_${employee?.id || 'unknown'}`
+
+  // Load timer state from localStorage on mount
+  useEffect(() => {
+    if (!employee) return
+    
+    const savedState = localStorage.getItem(TIMER_STORAGE_KEY)
+    if (savedState) {
+      try {
+        const { isRunning: savedIsRunning, startTime: savedStartTime, description: savedDescription } = JSON.parse(savedState)
+        if (savedIsRunning && savedStartTime) {
+          const startDate = new Date(savedStartTime)
+          const now = new Date()
+          const elapsed = now.getTime() - startDate.getTime()
+          
+          // Only restore if the timer was started less than 12 hours ago
+          if (elapsed < 12 * 60 * 60 * 1000) {
+            setIsRunning(true)
+            setStartTime(startDate)
+            setElapsedTime(elapsed)
+            setDescription(savedDescription || "")
+            setMessage("Timer session restored from previous session")
+            
+            // Clear the message after 3 seconds
+            setTimeout(() => setMessage(""), 3000)
+          } else {
+            // Clear old timer data if it's too old
+            localStorage.removeItem(TIMER_STORAGE_KEY)
+          }
+        }
+      } catch (error) {
+        console.error('Error loading saved timer state:', error)
+        localStorage.removeItem(TIMER_STORAGE_KEY)
+      }
+    }
+  }, [employee, TIMER_STORAGE_KEY])
+
+  // Save timer state to localStorage whenever it changes
+  useEffect(() => {
+    if (!employee) return
+    
+    const timerState = {
+      isRunning,
+      startTime: startTime?.toISOString(),
+      description
+    }
+    
+    if (isRunning && startTime) {
+      localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(timerState))
+    } else {
+      localStorage.removeItem(TIMER_STORAGE_KEY)
+    }
+  }, [isRunning, startTime, description, employee, TIMER_STORAGE_KEY])
 
   useEffect(() => {
     if (isRunning && startTime) {
@@ -69,16 +125,16 @@ export function Timer({ className }: TimerProps) {
 
   // Online presence system
   useEffect(() => {
-    if (!user) return
+    if (!account || !employee) return
 
     const updatePresence = () => {
       const now = new Date().toISOString()
 
       // Update current user's presence
       const currentPresence = {
-        uid: user.accountId,
-        name: user.name,
-        profilePhoto: user.profilePhoto,
+        uid: account.id,
+        name: `${employee.first_name} ${employee.last_name}`,
+        profilePhoto: employee.profile_photo,
         lastSeen: now,
         isOnline: true,
       }
@@ -88,7 +144,7 @@ export function Timer({ className }: TimerProps) {
       const presenceData: { [key: string]: OnlineUser } = storedPresence ? JSON.parse(storedPresence) : {}
 
       // Update current user
-      presenceData[user.accountId] = currentPresence
+      presenceData[account.id] = currentPresence
 
       // Mark users as offline if they haven't been seen in 5 minutes
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
@@ -102,7 +158,7 @@ export function Timer({ className }: TimerProps) {
 
       // Update online users list
       const onlineList = Object.values(presenceData)
-        .filter((u) => u.isOnline && u.uid !== user.accountId)
+        .filter((u) => u.isOnline && u.uid !== account.id)
         .sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime())
 
       setOnlineUsers(onlineList)
@@ -123,13 +179,13 @@ export function Timer({ className }: TimerProps) {
       const storedPresence = localStorage.getItem("userPresence")
       if (storedPresence) {
         const presenceData = JSON.parse(storedPresence)
-        if (presenceData[user.accountId]) {
-          presenceData[user.accountId].isOnline = false
+        if (presenceData[account.id]) {
+          presenceData[account.id].isOnline = false
           localStorage.setItem("userPresence", JSON.stringify(presenceData))
         }
       }
     }
-  }, [user])
+  }, [account, employee])
 
   const formatTime = (milliseconds: number) => {
     const totalSeconds = Math.floor(milliseconds / 1000)
@@ -163,10 +219,28 @@ export function Timer({ className }: TimerProps) {
     setShowStopDialog(true)
   }
 
-  const handleSaveTime = async () => {
-    if (!user || !startTime) return
+  const handleCancelTimer = () => {
+    setIsRunning(false)
+    setStartTime(null)
+    setElapsedTime(0)
+    setDescription("")
+    setShowStopDialog(false)
+    localStorage.removeItem(TIMER_STORAGE_KEY)
+    setMessage("Timer cancelled")
+    
+    // Clear the message after 2 seconds
+    setTimeout(() => setMessage(""), 2000)
+  }
 
+  const handleSaveTime = async () => {
+    if (!account || !employee || !startTime) return
+    if (saving) return // Prevent multiple simultaneous save attempts
+
+    setSaving(true)
+    
     try {
+      console.log("Starting timer save process...")
+      
       const endTime = new Date()
       const hours = elapsedTime / (1000 * 60 * 60)
       const today = new Date().toISOString().split("T")[0]
@@ -176,7 +250,7 @@ export function Timer({ className }: TimerProps) {
 
       // Create timer session data (let database auto-generate UUID)
       const sessionData = {
-        employee_id: user.employeeId,
+        employee_id: employee.id,
         date: today,
         start_time: startTime.toTimeString().split(' ')[0], // "09:00:00"
         end_time: endTime.toTimeString().split(' ')[0],     // "10:30:00"
@@ -185,23 +259,94 @@ export function Timer({ className }: TimerProps) {
         description: description.trim() || "Timer session",
       }
 
-      // Save to database - UUID auto-generated!
-      setTimeout(async () => {
+      console.log("Saving timer session:", sessionData)
+      
+      // Function to save with timeout and session refresh
+      const saveWithTimeoutAndRefresh = async (retryCount = 0): Promise<any> => {
+        console.log(`Save attempt ${retryCount + 1}...`)
+        
         try {
-          console.log("Saving timer session:", sessionData)
+          const { supabase } = await import('@/lib/supabase')
           
-          const { data, error } = await SupabaseService.createClockinSession(sessionData)
+          // Create a timeout promise that rejects after 5 seconds
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+              console.log("Save operation timed out after 5 seconds")
+              reject(new Error('Operation timed out - likely session expired'))
+            }, 5000)
+          })
           
-          if (error) {
-            console.error("Failed to save timer session:", error)
+          // Create the save promise
+          const savePromise = supabase
+            .from('clockin_session')
+            .insert([sessionData])
+            .select()
+          
+          // Race the save against the timeout
+          const result = await Promise.race([savePromise, timeoutPromise])
+          
+          console.log("Save completed successfully:", result)
+          return result
+          
+        } catch (error: any) {
+          console.log("Save failed or timed out:", error.message)
+          
+          // If it's a timeout or auth error and we haven't retried too many times
+          if (retryCount < 2 && (error.message.includes('timeout') || error.message.includes('JWT') || error.message.includes('auth'))) {
+            console.log("Attempting to refresh session and retry...")
+            setMessage(`Connection issue, refreshing session... (attempt ${retryCount + 2})`)
+            
+            try {
+              // Force refresh the session
+              const { supabase } = await import('@/lib/supabase')
+              const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+              
+              if (refreshError) {
+                console.error("Session refresh failed:", refreshError)
+                throw new Error("Session refresh failed")
+              }
+              
+              console.log("Session refreshed successfully, retrying save...")
+              
+              // Wait a moment for the session to stabilize
+              await new Promise(resolve => setTimeout(resolve, 1000))
+              
+              // Retry the save
+              return await saveWithTimeoutAndRefresh(retryCount + 1)
+              
+            } catch (refreshError) {
+              console.error("Failed to refresh session:", refreshError)
+              throw new Error("Failed to refresh session")
+            }
           } else {
-            console.log("Timer session saved successfully:", data)
+            // Max retries reached or different error
+            throw error
           }
-        } catch (err) {
-          console.error("Timer save error:", err)
         }
-      }, 100)
-
+      }
+      
+      // Execute the save with timeout and retry logic
+      try {
+        const { data, error } = await saveWithTimeoutAndRefresh()
+        
+        if (error) {
+          console.error("Failed to save timer session:", error)
+          setMessage("Error saving time session - please try again")
+          setSaving(false)
+          return
+        }
+        
+        console.log("Timer session saved successfully:", data)
+      } catch (saveError: any) {
+        console.error("All save attempts failed:", saveError)
+        setMessage("Failed to save after multiple attempts. Please refresh the page and try again.")
+        setSaving(false)
+        return
+      }
+      
+      // Clear persisted timer state since we're saving
+      localStorage.removeItem(TIMER_STORAGE_KEY)
+      
       setMessage(`${t("timeRecorded")}: ${formatTime(elapsedTime)}`)
       setShowStopDialog(false)
       setDescription("")
@@ -212,14 +357,17 @@ export function Timer({ className }: TimerProps) {
       setTimeout(() => {
         setMessage(`${t("timeRecorded")}. ${t("writeUpdate")}?`)
       }, 2000)
+      
     } catch (error) {
-      setMessage("Error saving time")
-      console.error("Error:", error)
+      console.error("Unexpected error in save process:", error)
+      setMessage("Error saving time - please try again")
+    } finally {
+      setSaving(false)
     }
   }
 
   const getTimerButtonClass = (isStop: boolean) => {
-    const theme = user?.theme || "light"
+    const theme = employee?.theme || "light"
     const baseClass =
       "w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 rounded-full text-sm sm:text-base lg:text-lg font-semibold transition-all"
 
@@ -347,38 +495,60 @@ export function Timer({ className }: TimerProps) {
         </CardContent>
       </Card>
 
-      {/* Stop Timer Dialog */}
-      <Dialog open={showStopDialog} onOpenChange={setShowStopDialog}>
-        <DialogContent className="w-[95vw] max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-base sm:text-lg">{t("timeRecorded")}</DialogTitle>
-            <DialogDescription className="text-sm">Session duration: {formatTime(elapsedTime)}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="description" className="text-sm">
-                {t("description")} (Optional)
-              </Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder={t("whatWorkedOn")}
-                rows={3}
-                className="text-sm"
-              />
+              {/* Stop Timer Dialog */}
+        <Dialog open={showStopDialog} onOpenChange={() => {}}>
+          <DialogContent className="w-[95vw] max-w-md [&>button]:hidden">
+            <DialogHeader>
+              <DialogTitle className="text-base sm:text-lg">{t("timeRecorded")}</DialogTitle>
+              <DialogDescription className="text-sm">Session duration: {formatTime(elapsedTime)}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-sm">
+                  {t("description")} (Optional)
+                </Label>
+                <Textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t("whatWorkedOn")}
+                  rows={3}
+                  className="text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleSaveTime} 
+                  disabled={saving}
+                  className="flex-1 text-sm"
+                >
+                  {saving ? "Saving..." : "Save to Calendar"}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  disabled={saving}
+                  onClick={() => {
+                    setShowStopDialog(false)
+                    setIsRunning(true)
+                  }} 
+                  className="flex-1 text-sm"
+                >
+                  Continue Timer
+                </Button>
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Button 
+                  variant="destructive" 
+                  disabled={saving}
+                  onClick={handleCancelTimer} 
+                  className="flex-1 text-sm"
+                >
+                  Discard Timer
+                </Button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSaveTime} className="flex-1 text-sm">
-                Save to Calendar
-              </Button>
-              <Button variant="outline" onClick={() => setShowStopDialog(false)} className="flex-1 text-sm">
-                {t("cancel")}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
 
       {/* Focus Reminder Dialog */}
       <Dialog open={showFocusReminder} onOpenChange={setShowFocusReminder}>

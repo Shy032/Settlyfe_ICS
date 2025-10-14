@@ -12,18 +12,18 @@ interface NavigationWrapperProps {
 }
 
 export function NavigationWrapper({ children }: NavigationWrapperProps) {
-  const { user, updateUser } = useAuth()
+  const { account, employee, updateProfile } = useAuth()
   const pathname = usePathname()
   const [currentTheme, setCurrentTheme] = useState<string>("light")
 
   // Initialize theme on component mount
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedTheme = user?.theme || "light"
+      const savedTheme = employee?.theme || "light"
       setCurrentTheme(savedTheme)
       applyTheme(savedTheme)
     }
-  }, [user])
+  }, [employee])
 
   const applyTheme = (theme: string) => {
     if (typeof window !== "undefined") {
@@ -42,11 +42,10 @@ export function NavigationWrapper({ children }: NavigationWrapperProps) {
     setCurrentTheme(newTheme)
     applyTheme(newTheme)
 
-    // Update user preference
-    if (user) {
+    // Update employee preference
+    if (employee) {
       try {
-        const updatedUser = { ...user, theme: newTheme }
-        await updateUser(updatedUser)
+        await updateProfile({ theme: newTheme })
       } catch (error) {
         console.error("Error updating theme:", error)
       }
@@ -60,7 +59,7 @@ export function NavigationWrapper({ children }: NavigationWrapperProps) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {user && (
+      {account && employee && (
         <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
           <div className="flex h-16 items-center justify-between py-4 px-8">
             <div className="flex items-center pl-4">
@@ -70,7 +69,7 @@ export function NavigationWrapper({ children }: NavigationWrapperProps) {
             </div>
             <div className="flex items-center gap-4">
               <Link
-                href={`/profile/${user?.uid}`}
+                href={`/profile/${employee?.id}`}
                 className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white select-none"
               >
                 Profile

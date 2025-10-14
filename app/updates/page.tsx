@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-
+import { DailyUpdate, Task } from "@/types"
+import { SupabaseService } from "@/lib/supabase"
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,12 +17,11 @@ import { Calendar, Upload, ImageIcon, MessageSquare, Eye, Edit, MapPin } from "l
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAuth } from "@/contexts/auth-context"
-import type { DailyUpdate, Task } from "@/types"
 
 const EMOJI_OPTIONS = ["👍", "🔥", "✅", "💪", "🎯", "⭐", "👏", "🚀"]
 
 export default function UpdatesPage() {
-  const { user, isAdmin } = useAuth()
+  const { account, employee, isAdmin } = useAuth()
   const [updates, setUpdates] = useState<DailyUpdate[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,44 +51,48 @@ export default function UpdatesPage() {
   }
 
   useEffect(() => {
-    if (!user) {
+    if (!account || !employee) {
       router.push("/login")
       return
     }
 
-    loadData()
-    setLoading(false)
-  }, [user, router])
+    const init = async () => {
+      try {
+        await loadData()
+      } catch (error) {
+        console.error('Error loading data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [account, employee, router])
 
-  const loadData = () => {
-    if (typeof window !== "undefined") {
+  const loadData = async () => {
+    try {
       // Load user's daily updates
-      const storedUpdates = localStorage.getItem(`dailyUpdates_${user?.uid}`)
-      if (storedUpdates) {
-        const updatesData = JSON.parse(storedUpdates) as DailyUpdate[]
-        updatesData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        setUpdates(updatesData)
+      if (employee?.id) {
+        const { data: updatesData, error: updatesError } = await SupabaseService.getDailyUpdates(employee.id)
+        if (updatesError) {
+          console.error('Error loading updates:', updatesError)
+        } else if (updatesData) {
+          setUpdates(updatesData)
+        }
       }
 
-      // Load tasks assigned to user - filter based on team visibility
-      const storedTasks = localStorage.getItem("tasks")
-      if (storedTasks) {
-        const tasksData = JSON.parse(storedTasks) as Task[]
-        const userTasks = tasksData.filter((task) => {
-          if (!task.published) return false
-
-          // If task is for everyone, show it
-          if (task.visibility === "everyone") return true
-
-          // If task is team-only, check if user is in same team or assigned
-          if (task.visibility === "team-only") {
-            return task.teamId === user?.teamId || task.ownerUids.includes(user?.uid || "")
-          }
-
-          return false
-        })
+      // Load tasks
+      const { data: tasksData, error: tasksError } = await SupabaseService.getTasks(
+        employee?.id,
+        account?.access_level
+      )
+      if (tasksError) {
+        console.error('Error loading tasks:', tasksError)
+      } else if (tasksData) {
+        const userTasks = tasksData.filter(task => task.published)
         setTasks(userTasks)
       }
+    } catch (error) {
+      console.error('Error in loadData:', error)
     }
   }
 
@@ -103,7 +107,7 @@ export default function UpdatesPage() {
 
   const handleSubmitUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!text.trim()) {
+    if (!text.trim() || !employee?.id) {
       setMessage("Please enter your daily update")
       return
     }
@@ -112,45 +116,36 @@ export default function UpdatesPage() {
     setMessage("")
 
     try {
-      // Simulate file upload to storage
+      // TODO: Implement file upload to Supabase storage
       let screenshotUrl = ""
       if (selectedFile) {
-        // In a real app, this would upload to Firebase Storage
+        // File upload to Supabase Storage will be implemented here
         screenshotUrl = previewUrl || ""
       }
 
-      const weekId = getWeekId(today)
-
-      const newUpdate: DailyUpdate = {
-        id: `update_${user?.uid}_${today}`,
-        uid: user?.uid || "",
+      const updateData = {
+        employee_id: employee.id,
         date: today,
-        weekId,
-        text,
-        screenshot: screenshotUrl,
-        taskId: selectedTaskId || undefined,
+        description: text,
+        task_id: selectedTaskId || undefined,
         location: location.trim() || undefined,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        screenshot_path: screenshotUrl || undefined
       }
-
-      // Get existing updates
-      const existingUpdates = localStorage.getItem(`dailyUpdates_${user?.uid}`)
-      const updatesArray: DailyUpdate[] = existingUpdates ? JSON.parse(existingUpdates) : []
 
       // Check if update for today already exists
-      const existingIndex = updatesArray.findIndex((u) => u.date === today)
-      if (existingIndex >= 0) {
-        updatesArray[existingIndex] = {
-          ...updatesArray[existingIndex],
-          ...newUpdate,
-          updatedAt: new Date().toISOString(),
-        }
+      const { data: existingUpdates } = await SupabaseService.getDailyUpdates(employee.id, 1)
+      const todayUpdate = existingUpdates?.find(u => u.date === today)
+
+      let result
+      if (todayUpdate) {
+        result = await SupabaseService.updateDailyUpdate(todayUpdate.id, updateData)
       } else {
-        updatesArray.push(newUpdate)
+        result = await SupabaseService.createDailyUpdate(updateData)
       }
 
-      localStorage.setItem(`dailyUpdates_${user?.uid}`, JSON.stringify(updatesArray))
+      if (result.error) {
+        throw result.error
+      }
 
       setMessage("Daily update posted successfully!")
       loadData()
@@ -329,30 +324,26 @@ export default function UpdatesPage() {
                       <div className="flex justify-between items-start mb-2">
                         <span className="text-sm font-medium">{new Date(update.date).toLocaleDateString()}</span>
                         <div className="flex items-center gap-1">
-                          {update.emoji && <span className="text-lg">{update.emoji}</span>}
+
                           <Button size="sm" variant="ghost" onClick={() => handleReviewUpdate(update)}>
                             <Eye className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
-                      <p className="text-sm text-muted-foreground line-clamp-3">{update.text}</p>
+                      <p className="text-sm text-muted-foreground line-clamp-3">{update.description}</p>
                       {update.location && (
                         <div className="mt-2 flex items-center gap-1">
                           <MapPin className="h-3 w-3 text-muted-foreground" />
                           <span className="text-xs text-muted-foreground">{update.location}</span>
                         </div>
                       )}
-                      {update.screenshot && (
+                      {update.screenshot_path && (
                         <div className="mt-2">
                           <ImageIcon className="h-4 w-4 text-muted-foreground" />
                         </div>
                       )}
-                      {update.comment && (
-                        <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 rounded text-xs">
-                          <strong>Feedback:</strong> {update.comment}
-                        </div>
-                      )}
-                      {update.updatedAt && update.updatedAt !== update.createdAt && (
+
+                      {update.updated_at && update.updated_at !== update.created_at && (
                         <Badge variant="outline" className="mt-2 text-xs">
                           <Edit className="h-3 w-3 mr-1" />
                           Updated
@@ -387,7 +378,7 @@ export default function UpdatesPage() {
                 <div>
                   <Label>Update Content</Label>
                   <div className="mt-1 p-3 bg-muted rounded-lg">
-                    <p className="text-sm whitespace-pre-wrap">{selectedUpdate.text}</p>
+                    <p className="text-sm whitespace-pre-wrap">{selectedUpdate.description}</p>
                   </div>
                 </div>
 
@@ -401,12 +392,12 @@ export default function UpdatesPage() {
                   </div>
                 )}
 
-                {selectedUpdate.screenshot && (
+                {selectedUpdate.screenshot_path && (
                   <div>
                     <Label>Screenshot</Label>
                     <div className="mt-1">
                       <img
-                        src={selectedUpdate.screenshot || "/placeholder.svg"}
+                        src={selectedUpdate.screenshot_path || "/placeholder.svg"}
                         alt="Daily update screenshot"
                         className="max-w-full h-auto rounded border"
                       />
@@ -414,39 +405,25 @@ export default function UpdatesPage() {
                   </div>
                 )}
 
-                {selectedUpdate.taskId && (
+                {selectedUpdate.task_id && (
                   <div>
                     <Label>Related Task</Label>
                     <p className="text-sm text-muted-foreground mt-1">
-                      {tasks.find((t) => t.id === selectedUpdate.taskId)?.title || "Unknown task"}
+                      {tasks.find((t) => t.id === selectedUpdate.task_id)?.title || "Unknown task"}
                     </p>
                   </div>
                 )}
 
                 <div className="flex justify-between items-center text-sm text-muted-foreground">
-                  <span>Posted: {new Date(selectedUpdate.createdAt).toLocaleString()}</span>
-                  {selectedUpdate.updatedAt && selectedUpdate.updatedAt !== selectedUpdate.createdAt && (
-                    <span>Updated: {new Date(selectedUpdate.updatedAt).toLocaleString()}</span>
+                  <span>Posted: {new Date(selectedUpdate.created_at).toLocaleString()}</span>
+                  {selectedUpdate.updated_at && selectedUpdate.updated_at !== selectedUpdate.created_at && (
+                    <span>Updated: {new Date(selectedUpdate.updated_at).toLocaleString()}</span>
                   )}
                 </div>
 
-                {selectedUpdate.emoji && (
-                  <div>
-                    <Label>Admin Reaction</Label>
-                    <div className="mt-1">
-                      <span className="text-2xl">{selectedUpdate.emoji}</span>
-                    </div>
-                  </div>
-                )}
 
-                {selectedUpdate.comment && (
-                  <div>
-                    <Label>Admin Feedback</Label>
-                    <div className="mt-1 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <p className="text-sm text-blue-800 dark:text-blue-200">{selectedUpdate.comment}</p>
-                    </div>
-                  </div>
-                )}
+
+
               </div>
             </>
           )}
