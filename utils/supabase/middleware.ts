@@ -24,7 +24,19 @@ export async function updateSession(request: NextRequest) {
             request,
           })
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options)
+            // Ensure proper cookie options for production environment
+            const cookieOptions: CookieOptions = {
+              ...options,
+              // Force secure cookies in production (Vercel uses HTTPS)
+              secure: process.env.NODE_ENV === 'production',
+              // Set sameSite to lax for better compatibility
+              sameSite: 'lax' as const,
+              // Ensure httpOnly is properly set
+              httpOnly: options?.httpOnly ?? true,
+              // Set path to root if not specified
+              path: options?.path ?? '/',
+            }
+            response.cookies.set(name, value, cookieOptions)
           })
         },
       },

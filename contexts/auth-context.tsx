@@ -54,20 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Auth state change:', event, session?.user?.id)
       
       if (session?.user && session.user.email_confirmed_at) {
-        // Handle email confirmation - create profile if it doesn't exist
-        if (event === 'SIGNED_IN') {
-          await handleEmailConfirmation(session.user)
-        }
-        
         // Handle token refresh
         if (event === 'TOKEN_REFRESHED') {
           console.log('Token refreshed successfully')
         }
         
-        // Only load profile if we don't already have an account loaded or if the account changed
-        if (!account || account.id !== session.user.id) {
-          await loadProfile(session.user)
-        }
+        // Load profile for valid sessions
+        // Don't call handleEmailConfirmation here - it causes infinite loading on page refresh
+        await loadProfile(session.user)
       } else {
         // No valid session or unconfirmed email
         setAccount(null)
@@ -105,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
       clearInterval(tokenRefreshInterval)
     }
-  }, [])
+  }, []) // Keep empty deps - loadProfile doesn't need account in dependency since it always fetches fresh data
 
   const handleEmailConfirmation = async (supabaseUser: SupabaseUser) => {
     try {
@@ -169,7 +163,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (accountError || !accountData) {
         console.error('Error loading account:', accountError)
-        await signOut()
+        // Don't sign out on database errors - just log and let user retry
+        // Only clear state so the app can recover
+        setAccount(null)
+        setEmployee(null)
+        setLoading(false)
         return
       }
       console.log('Account data loaded:', accountData)
@@ -179,7 +177,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (employeeError || !employeeData) {
         console.error('Error loading employee:', employeeError)
-        await signOut()
+        // Don't sign out on database errors - just log and let user retry
+        setAccount(null)
+        setEmployee(null)
+        setLoading(false)
         return
       }
       console.log('Employee data loaded:', employeeData)
@@ -209,7 +210,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
     } catch (error) {
       console.error('Error in loadProfile:', error)
-      await signOut()
+      // Don't sign out on unexpected errors - just clear state
+      setAccount(null)
+      setEmployee(null)
+      setLoading(false)
     }
   }
 

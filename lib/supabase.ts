@@ -13,6 +13,20 @@ console.log('Supabase Config:', {
 
 export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
+// Timeout wrapper for database queries
+const withTimeout = async <T>(
+  promise: Promise<T>,
+  timeoutMs: number = 2000,
+  errorMessage: string = 'Query timeout'
+): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
+    )
+  ])
+}
+
 // Database operations wrapper
 export class SupabaseService {
   // Authentication and Account Management
@@ -67,18 +81,30 @@ export class SupabaseService {
   // Account operations
   static async getAccountById(account_id: string) {
     console.log('Fetching account by ID:', account_id)
-    const { data, error } = await supabase
-      .from('account')
-      .select(`
-        *,
-        employee:employee_id (*)
-      `)
-      .eq('id', account_id)
-      .single()
-    
-    if (error) console.error('Get account error:', error)
-    else console.log('Account fetched')
-    return { data, error }
+    try {
+      const query = supabase
+        .from('account')
+        .select(`
+          *,
+          employee:employee_id (*)
+        `)
+        .eq('id', account_id)
+        .single()
+      
+      const result = await withTimeout(
+        Promise.resolve(query),
+        2000,
+        'Account fetch timeout - please check your connection'
+      )
+      
+      const { data, error } = result as any
+      if (error) console.error('Get account error:', error)
+      else console.log('Account fetched')
+      return { data, error }
+    } catch (error: any) {
+      console.error('Get account timeout or error:', error)
+      return { data: null, error: { message: error.message } }
+    }
   }
 
   static async getAccountByEmail(email: string) {
@@ -139,20 +165,32 @@ export class SupabaseService {
 
   static async getEmployeeById(employee_id: string) {
     console.log('Fetching employee by ID:', employee_id)
-    const { data, error } = await supabase
-      .from('employee')
-      .select(`
-        *,
-        account!employee_id (login_email, access_level, status),
-        team:team_id (*),
-        department:department_id (*)
-      `)
-      .eq('id', employee_id)
-      .single()
-    
-    if (error) console.error('Get employee error:', error)
-    else console.log('Employee fetched')
-    return { data, error }
+    try {
+      const query = supabase
+        .from('employee')
+        .select(`
+          *,
+          account!employee_id (login_email, access_level, status),
+          team:team_id (*),
+          department:department_id (*)
+        `)
+        .eq('id', employee_id)
+        .single()
+      
+      const result = await withTimeout(
+        Promise.resolve(query as unknown as Promise<any>),
+        2000,
+        'Employee fetch timeout - please check your connection'
+      )
+      
+      const { data, error } = result as any
+      if (error) console.error('Get employee error:', error)
+      else console.log('Employee fetched')
+      return { data, error }
+    } catch (error: any) {
+      console.error('Get employee timeout or error:', error)
+      return { data: null, error: { message: error.message } }
+    }
   }
 
   static async updateEmployee(employee_id: string, employeeData: Partial<Employee>) {
